@@ -6,6 +6,8 @@ from time import sleep
 import os
 import matplotlib.pyplot as plt
 import re
+import seaborn as sns
+import numpy as np
 from collections import defaultdict
 
 # Variável para armazenar os dados recebidos
@@ -283,12 +285,22 @@ def do_parse():
 
     # List of metrics to plot - add or remove as needed
     metrics_to_plot = ["meanSqrdError", "accuracy", "precision", "recall", "f1Score"]
+
+    plot_average_metrics(json_data, metrics_to_plot)
     
     for metric in metrics_to_plot:
         try:
             plot_metrics(json_data, metric)
+            plot_clients_heatmap(json_data, metric)
         except Exception as e:
             print(f"Error plotting {metric}: {e}")
+    
+    # Plot multiple metrics for all clients
+    for client_id in set(item["client"] for item in json_data):
+        try:
+            plot_multiple_metrics(json_data, client_id, metrics=metrics_to_plot)
+        except Exception as e:
+            print(f"Error plotting metrics for client {client_id}: {e}")
     
 
 def plot_metrics(json_data, metric_name="meanSqrdError"):
@@ -341,6 +353,186 @@ def plot_metrics(json_data, metric_name="meanSqrdError"):
     
     # Show plot
     plt.show()
+
+def plot_multiple_metrics(json_data, client_id, metrics=["meanSqrdError", "accuracy"]):
+    """Plot multiple metrics for a specific client"""
+    
+    # Filter data for specific client
+    client_data = [item for item in json_data if item["client"] == client_id]
+    
+    if not client_data:
+        print(f"No data found for client: {client_id}")
+        return
+    
+    # Sort by round
+    client_data.sort(key=lambda x: x.get("round", 0))
+    
+    plt.figure(figsize=(12, 8))
+    
+    for metric in metrics:
+        values = []
+        rounds = []
+        for item in client_data:
+            if metric in item["metrics"]:
+                values.append(float(item["metrics"][metric]))
+                rounds.append(item.get("round", 0))
+        
+        if values:
+            plt.plot(rounds, values, 'o-', label=metric)
+    
+    plt.title(f"Metrics Evolution for Client {client_id}")
+    plt.xlabel("Round")
+    plt.ylabel("Metric Value")
+    plt.legend()
+    plt.grid(True)
+    
+    filename = f"plot_client_{client_id}_metrics.png"
+    plt.savefig(filename)
+    plt.show()
+
+def plot_clients_heatmap(json_data, metric="meanSqrdError"):
+    """Create a heatmap showing all clients' performance across rounds"""
+    
+    # Get unique clients and rounds
+    clients = set()
+    rounds = set()
+    
+    for item in json_data:
+        clients.add(item["client"])
+        rounds.add(item.get("round", 0))
+    
+    clients = sorted(list(clients))
+    rounds = sorted(list(rounds))
+    
+    # Create matrix for heatmap
+    matrix = np.zeros((len(clients), len(rounds)))
+    matrix[:] = np.nan  # Fill with NaN initially
+    
+    # Fill matrix with data
+    for item in json_data:
+        client = item["client"]
+        round_num = item.get("round", 0)
+        
+        if metric in item["metrics"]:
+            client_idx = clients.index(client)
+            round_idx = rounds.index(round_num)
+            matrix[client_idx][round_idx] = float(item["metrics"][metric])
+    
+    # Create heatmap
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(matrix, annot=True, fmt=".3f", cmap="viridis", 
+                xticklabels=rounds, yticklabels=clients)
+    plt.title(f"Heatmap of {metric} across clients and rounds")
+    plt.xlabel("Round")
+    plt.ylabel("Client")
+    
+    plt.savefig(f"heatmap_{metric}.png")
+    plt.show()
+
+def plot_average_metrics(json_data, metrics_to_plot=["meanSqrdError", "accuracy", "precision", "recall", "f1Score"]):
+    """
+    Plot the average value of each metric across all clients for each round.
+    
+    Parameters:
+    - json_data: List of parsed JSON objects with metrics
+    - metrics_to_plot: List of metrics to include in the plot
+    """
+    # Group data by round and metric
+    round_data = defaultdict(lambda: defaultdict(list))
+    
+    # Get all rounds
+    all_rounds = sorted(set(item.get("round", 0) for item in json_data))
+    
+    # Extract metrics by round
+    for item in json_data:
+        round_num = item.get("round", 0)
+        for metric in metrics_to_plot:
+            if metric in item["metrics"]:
+                try:
+                    value = float(item["metrics"][metric])
+                    round_data[round_num][metric].append(value)
+                except (ValueError, TypeError):
+                    # Skip non-numeric values
+                    pass
+    
+    # Calculate averages
+    averages = {}
+    for metric in metrics_to_plot:
+        averages[metric] = []
+        for round_num in all_rounds:
+            values = round_data[round_num][metric]
+            if values:
+                avg = sum(values) / len(values)
+                averages[metric].append((round_num, avg))
+            else:
+                # No data for this round and metric
+                pass
+    
+    # Create plot
+    plt.figure(figsize=(12, 8))
+    
+    for metric, points in averages.items():
+        if points:  # Only plot if we have data
+            # Sort by round number
+            points.sort(key=lambda x: x[0])
+            rounds = [p[0] for p in points]
+            values = [p[1] for p in points]
+            plt.plot(rounds, values, 'o-', linewidth=2, label=metric)
+    
+    plt.title("Average Metrics Across All Clients by Round")
+    plt.xlabel("Round")
+    plt.ylabel("Average Metric Value")
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.xticks(all_rounds)  # Show all rounds on x-axis
+    
+    # Add value annotations to points
+    for metric, points in averages.items():
+        if points:
+            for round_num, value in points:
+                plt.annotate(f"{value:.3f}", 
+                             (round_num, value),
+                             textcoords="offset points", 
+                             xytext=(0,10), 
+                             ha='center')
+    
+    # Save plot
+    filename = "plot_average_metrics.png"
+    plt.savefig(filename)
+    print(f"Plot saved as {filename}")
+    
+    # Show plot
+    plt.show()
+
+    # Also create individual plots for each metric for clarity
+    for metric in metrics_to_plot:
+        if metric not in averages or not averages[metric]:
+            continue
+            
+        plt.figure(figsize=(10, 6))
+        points = sorted(averages[metric], key=lambda x: x[0])
+        rounds = [p[0] for p in points]
+        values = [p[1] for p in points]
+        
+        plt.plot(rounds, values, 'o-', linewidth=3, color='blue')
+        plt.title(f"Average {metric} Across All Clients by Round")
+        plt.xlabel("Round")
+        plt.ylabel(f"Average {metric}")
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.xticks(all_rounds)
+        
+        # Add value annotations
+        for round_num, value in zip(rounds, values):
+            plt.annotate(f"{value:.3f}", 
+                        (round_num, value),
+                        textcoords="offset points", 
+                        xytext=(0,10), 
+                        ha='center')
+        
+        filename = f"plot_average_{metric}.png"
+        plt.savefig(filename)
+        print(f"Plot saved as {filename}")
+        plt.show()
 
 # Configuração do cliente MQTT
 client = mqtt.Client()
