@@ -2,14 +2,16 @@ import paho.mqtt.client as mqtt
 import os
 
 # Configuração do broker MQTT
-BROKER_IP = "10.131.12.37"
+BROKER_IP = "127.0.0.1"
 TOPIC_WEIGHTS = "esp32/model_weights"
 TOPIC_BIASES = "esp32/model_biases"
+TOPIC_AI = "esp32/ai"
 
 # Dicionário para armazenar os dados recebidos antes de salvar
 data_buffer = {
     TOPIC_WEIGHTS: [],
-    TOPIC_BIASES: []
+    TOPIC_BIASES: [],
+    TOPIC_AI: []
 }
 
 # Função chamada quando uma mensagem MQTT é recebida
@@ -47,7 +49,7 @@ client.on_message = on_message
 client.connect(BROKER_IP, 1883, 60)
 
 # Inscreve-se nos tópicos de interesse
-client.subscribe([(TOPIC_WEIGHTS, 0), (TOPIC_BIASES, 0)])
+client.subscribe([(TOPIC_WEIGHTS, 0), (TOPIC_BIASES, 0), (TOPIC_AI, 0)])
 
 print("Escutando mensagens MQTT... Pressione Ctrl+C para sair.")
 client.loop_forever()

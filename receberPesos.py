@@ -13,7 +13,7 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Conectado ao broker MQTT!")
         # Assinar o tópico para todos os ESPs
-        client.subscribe("esp32/+/weights")  # O "+" é um curinga que pega esp01, esp02, etc.
+        client.subscribe("esp32/ai")  # O "+" é um curinga que pega esp01, esp02, etc.
     else:
         print(f"Falha na conexão. Código de erro: {rc}")
 
@@ -78,7 +78,7 @@ client.on_connect = on_connect
 client.on_message = on_message
 
 # Conectar ao broker MQTT
-broker_ip = "192.168.15.11"  # Substitua pelo IP do seu broker
+broker_ip = "127.0.0.1"  # Substitua pelo IP do seu broker
 client.connect(broker_ip, 1883, 60)
 
 # Manter o cliente em loop para escutar mensagens
