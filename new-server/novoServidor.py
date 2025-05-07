@@ -40,15 +40,18 @@ def on_connect(client, userdata, flags, rc):
 
 # Função chamada quando uma mensagem MQTT é recebida
 def on_message(client, userdata, message):
-    payload = message.payload.decode("utf-8")
-    topic = message.topic
+    try:
+        payload = message.payload.decode("utf-8")
+        topic = message.topic
 
-    topic_parts = message.topic.split('/')
-    if (topic_parts[2] == "model"):
-        # save_file(payload, client)
-        save_to_json_file(payload)
-    elif (topic_parts[2] == "commands"):
-        parse_command(payload)
+        topic_parts = message.topic.split('/')
+        if (topic_parts[2] == "model"):
+            # save_file(payload, client)
+            save_to_json_file(payload)
+        elif (topic_parts[2] == "commands"):
+            parse_command(payload)
+    except UnicodeDecodeError:
+        print("Erro ao decodificar a mensagem. Ignorando...")
 
 def parse_command(payload):
     msg = json.loads(payload)
