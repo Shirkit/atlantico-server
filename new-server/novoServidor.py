@@ -279,6 +279,10 @@ def do_parse():
   
                 data["metrics"] = data["data"]["metrics"]
                 data["client"] = data["data"]["client"]
+                data["timings"] = data["data"]["timings"]
+                data["datasetSize"] = data["data"]["datasetSize"]
+                data["model"] = data["data"]["model"]
+                data["epochs"] = data["data"]["epochs"]
                 data["data"] = None
                 json_data.append(data)
                 print(data)
@@ -305,7 +309,16 @@ def do_parse():
             plot_multiple_metrics(json_data, client_id, metrics=metrics_to_plot)
         except Exception as e:
             print(f"Error plotting metrics for client {client_id}: {e}")
-    
+
+    try:
+        plot_training_efficiency(json_data)
+        plot_processing_time_breakdown(json_data)
+        plot_training_efficiency_per_epoch(json_data)
+        plot_model_architecture(json_data)
+        plot_training_speed_vs_complexity(json_data)
+    except Exception as e:
+        print(f"Error generating performance plots: {e}")
+ 
 
 def plot_metrics(json_data, metric_name="meanSqrdError"):
     """
@@ -354,9 +367,10 @@ def plot_metrics(json_data, metric_name="meanSqrdError"):
     filename = f"plot_{metric_name}.png"
     plt.savefig(filename)
     print(f"Plot saved as {filename}")
+    plt.close()
     
     # Show plot
-    plt.show()
+    # plt.show()
 
 def plot_multiple_metrics(json_data, client_id, metrics=["meanSqrdError", "accuracy"]):
     """Plot multiple metrics for a specific client"""
@@ -392,7 +406,8 @@ def plot_multiple_metrics(json_data, client_id, metrics=["meanSqrdError", "accur
     
     filename = f"plot_client_{client_id}_metrics.png"
     plt.savefig(filename)
-    plt.show()
+    plt.close()
+    # plt.show()
 
 def plot_clients_heatmap(json_data, metric="meanSqrdError"):
     """Create a heatmap showing all clients' performance across rounds"""
@@ -431,7 +446,285 @@ def plot_clients_heatmap(json_data, metric="meanSqrdError"):
     plt.ylabel("Client")
     
     plt.savefig(f"heatmap_{metric}.png")
-    plt.show()
+    plt.close()
+    # plt.show()
+
+def plot_training_efficiency_per_epoch(json_data):
+    """Plot relationship between training time per sample and accuracy"""
+    
+    # Extract data
+    times_per_sample = []
+    accuracies = []
+    client_rounds = []
+    epochs_list = []
+    
+    for item in json_data:
+        if "timings" in item and "training" in item["timings"]:
+            training_time = item["timings"]["training"] / 1000  # seconds
+            dataset_size = item["datasetSize"]
+            epochs = item["epochs"]
+            
+            # Calculate time per sample per epoch
+            time_per_sample = training_time / (dataset_size * epochs)
+            
+            times_per_sample.append(time_per_sample)
+            accuracies.append(float(item["metrics"]["accuracy"]))
+            client_rounds.append(f"{item['client']}-R{item.get('round', 0)}")
+            epochs_list.append(epochs)
+    
+    # Create plot
+    plt.figure(figsize=(12, 8))
+    
+    # Create scatter plot with size based on epochs
+    scatter = plt.scatter(times_per_sample, accuracies, 
+                         c=epochs_list, s=80, alpha=0.7, 
+                         cmap='plasma', marker='o')
+    
+    # Add labels
+    for i, cr in enumerate(client_rounds):
+        plt.annotate(cr, (times_per_sample[i], accuracies[i]), 
+                    textcoords="offset points", xytext=(5,5))
+    
+    # Add trend line
+    z = np.polyfit(times_per_sample, accuracies, 1)
+    p = np.poly1d(z)
+    plt.plot([min(times_per_sample), max(times_per_sample)], 
+             [p(min(times_per_sample)), p(max(times_per_sample))], 
+             "r--", alpha=0.8)
+    
+    cbar = plt.colorbar(scatter)
+    cbar.set_label('Number of Epochs')
+    
+    plt.title('Training Efficiency: Accuracy vs Time per Sample per Epoch')
+    plt.xlabel('Time per Sample per Epoch (seconds)')
+    plt.ylabel('Accuracy')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    plt.tight_layout()
+    plt.savefig("training_efficiency_per_epoch.png")
+    plt.close()
+    # plt.show()
+
+def plot_model_architecture(json_data):
+    """Visualize the neural network architecture used in the training"""
+    
+    # Find unique model architectures
+    model_architectures = {}
+    
+    for item in json_data:
+        if "model" in item:
+            arch_key = "-".join(str(x) for x in item["model"])
+            if arch_key not in model_architectures:
+                model_architectures[arch_key] = {
+                    "architecture": item["model"],
+                    "clients": []
+                }
+            if item["client"] not in model_architectures[arch_key]["clients"]:
+                model_architectures[arch_key]["clients"].append(item["client"])
+    
+    # Plot each unique architecture
+    for arch_key, arch_data in model_architectures.items():
+        layers = arch_data["architecture"]
+        clients = arch_data["clients"]
+        
+        plt.figure(figsize=(10, 6))
+        
+        # Plot layers as circles with size proportional to nodes
+        x = np.arange(len(layers))
+        y = np.zeros(len(layers))
+        
+        max_nodes = max(layers)
+        sizes = [1000 * layer / max_nodes for layer in layers]
+        
+        plt.scatter(x, y, s=sizes, c=range(len(layers)), cmap='coolwarm', alpha=0.7, zorder=2)
+        
+        # Draw connections between layers
+        for i in range(len(layers) - 1):
+            plt.plot([i, i+1], [0, 0], 'gray', alpha=0.5, zorder=1)
+        
+        # Add layer labels with node counts
+        for i, layer_size in enumerate(layers):
+            plt.annotate(f"{layer_size}", (i, 0), textcoords="offset points", 
+                       xytext=(0,10), ha='center', fontsize=12, fontweight='bold')
+        
+        plt.title(f'Neural Network Architecture: {arch_key}')
+        plt.xlabel('Layer')
+        plt.xticks(x, [f'Layer {i}' for i in range(len(layers))])
+        plt.yticks([])
+        plt.grid(False)
+        
+        # Add client info
+        plt.figtext(0.5, 0.01, f"Used by clients: {', '.join(clients)}", 
+                   ha="center", fontsize=10)
+        
+        plt.tight_layout()
+        plt.savefig(f"model_architecture_{arch_key}.png")
+        plt.close()
+        # plt.show()
+
+def plot_training_speed_vs_complexity(json_data):
+    """Plot the relationship between model complexity and training speed"""
+    
+    # Extract data
+    model_sizes = []  # Total number of weights/parameters
+    training_speeds = []  # Samples per second
+    client_rounds = []
+    f1_scores = []
+    
+    for item in json_data:
+        if "model" in item and "timings" in item:
+            # Calculate model size (total parameters)
+            layers = item["model"]
+            params = 0
+            for i in range(len(layers)-1):
+                params += layers[i] * layers[i+1]  # Weights
+                params += layers[i+1]  # Biases
+            
+            # Calculate training speed
+            training_time = item["timings"].get("training", 0) / 1000  # seconds
+            if training_time > 0:
+                samples_per_second = item["datasetSize"] / training_time
+            else:
+                samples_per_second = 0
+            
+            model_sizes.append(params)
+            training_speeds.append(samples_per_second)
+            client_rounds.append(f"{item['client']}-R{item.get('round', 0)}")
+            f1_scores.append(float(item["metrics"]["f1Score"]))
+    
+    # Create plot
+    plt.figure(figsize=(12, 8))
+    
+    scatter = plt.scatter(model_sizes, training_speeds, 
+                         c=f1_scores, s=100, alpha=0.7, 
+                         cmap='YlGnBu')
+    
+    # Add annotations
+    for i, cr in enumerate(client_rounds):
+        plt.annotate(cr, (model_sizes[i], training_speeds[i]), 
+                    textcoords="offset points", xytext=(5,5))
+    
+    # Add trend line
+    if len(model_sizes) > 1:
+        z = np.polyfit(model_sizes, training_speeds, 1)
+        p = np.poly1d(z)
+        plt.plot([min(model_sizes), max(model_sizes)], 
+                [p(min(model_sizes)), p(max(model_sizes))], 
+                "r--", alpha=0.8)
+    
+    cbar = plt.colorbar(scatter)
+    cbar.set_label('F1 Score')
+    
+    plt.title('Training Speed vs Model Complexity')
+    plt.xlabel('Model Size (number of parameters)')
+    plt.ylabel('Training Speed (samples/second)')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    plt.tight_layout()
+    plt.savefig("training_speed_vs_complexity.png")
+    plt.close()
+    # plt.show()
+
+def plot_processing_time_breakdown(json_data):
+    """Plot time breakdown for different processing stages"""
+    
+    # Create structure to hold timing data by client
+    clients = {}
+    
+    for item in json_data:
+        client = item["client"]
+        timings = item["timings"]
+        round_num = item.get("round", 0)
+        
+        if client not in clients:
+            clients[client] = {"rounds": [], "training": [], "parsing": [], "construct": []}
+        
+        clients[client]["rounds"].append(round_num)
+        clients[client]["training"].append(timings.get("training", 0) / 1000)  # Convert to seconds
+        clients[client]["parsing"].append(timings.get("parsing", 0) / 1000)
+        clients[client]["construct"].append(timings.get("previousConstruct", 0) / 1000)
+    
+    # Plot timing breakdown for each client
+    for client, data in clients.items():
+        # Sort by round
+        rounds = np.array(data["rounds"])
+        sort_idx = np.argsort(rounds)
+        rounds = rounds[sort_idx]
+        training = np.array(data["training"])[sort_idx]
+        parsing = np.array(data["parsing"])[sort_idx]
+        construct = np.array(data["construct"])[sort_idx]
+        
+        plt.figure(figsize=(10, 6))
+        
+        width = 0.25
+        x = np.arange(len(rounds))
+        
+        plt.bar(x - width, training, width, label='Training')
+        plt.bar(x, parsing, width, label='Parsing')
+        plt.bar(x + width, construct, width, label='Model Construction')
+        
+        plt.title(f'Processing Time Breakdown for Client {client}')
+        plt.xlabel('Round')
+        plt.ylabel('Time (seconds)')
+        plt.xticks(x, [str(r) for r in rounds])
+        plt.legend()
+        plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        
+        plt.savefig(f"time_breakdown_client_{client}.png")
+        plt.close()
+        # plt.show()
+
+def plot_training_efficiency(json_data):
+    """Plot the relationship between training time, dataset size, and model performance"""
+    
+    # Extract relevant data
+    training_times = []
+    dataset_sizes = []
+    errors = []
+    accuracies = []
+    client_ids = []
+    epochs = []
+    
+    for item in json_data:
+        if "timings" in item and "training" in item["timings"]:
+            training_times.append(item["timings"]["training"] / 1000)  # Convert to seconds
+            dataset_sizes.append(item["datasetSize"])
+            errors.append(float(item["metrics"]["meanSqrdError"]))
+            accuracies.append(float(item["metrics"]["accuracy"]))
+            client_ids.append(item["client"])
+            epochs.append(item["epochs"])
+    
+    # Create scatter plot
+    plt.figure(figsize=(12, 8))
+    scatter = plt.scatter(dataset_sizes, training_times, 
+                         c=accuracies, s=np.array(epochs)*50, 
+                         alpha=0.7, cmap='viridis')
+    
+    # Add labels for each point
+    for i, client in enumerate(client_ids):
+        plt.annotate(client, (dataset_sizes[i], training_times[i]), 
+                    textcoords="offset points", xytext=(0,10), ha='center')
+    
+    # Add colorbar for accuracy
+    cbar = plt.colorbar(scatter)
+    cbar.set_label('Accuracy')
+    
+    # Create legend for epochs
+    unique_epochs = sorted(set(epochs))
+    handles = [plt.scatter([], [], s=e*50, color='gray', alpha=0.7) for e in unique_epochs]
+    plt.legend(handles, [f'{e} epoch(s)' for e in unique_epochs], title="Training Epochs",
+              loc="upper left")
+    
+    plt.title('Training Time vs Dataset Size')
+    plt.xlabel('Dataset Size (samples)')
+    plt.ylabel('Training Time (seconds)')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    plt.tight_layout()
+    plt.savefig("training_efficiency.png")
+    plt.close()
+    # plt.show()
 
 def plot_average_metrics(json_data, metrics_to_plot=["meanSqrdError", "accuracy", "precision", "recall", "f1Score"]):
     """
@@ -504,9 +797,10 @@ def plot_average_metrics(json_data, metrics_to_plot=["meanSqrdError", "accuracy"
     filename = "plot_average_metrics.png"
     plt.savefig(filename)
     print(f"Plot saved as {filename}")
+    plt.close()
     
     # Show plot
-    plt.show()
+    # plt.show()
 
     # Also create individual plots for each metric for clarity
     for metric in metrics_to_plot:
@@ -536,7 +830,8 @@ def plot_average_metrics(json_data, metrics_to_plot=["meanSqrdError", "accuracy"
         filename = f"plot_average_{metric}.png"
         plt.savefig(filename)
         print(f"Plot saved as {filename}")
-        plt.show()
+        plt.close()
+        # plt.show()
 
 # Configuração do cliente MQTT
 client = mqtt.Client()
