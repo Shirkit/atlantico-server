@@ -17,6 +17,8 @@ federate = False
 federate_round = 0
 federate_path = ""
 
+print('\33]0;Escolha comando\a', end='', flush=True)
+print('\33]0;Escolha comando\a', end='', flush=True)
 
 BROKER_IP = "127.0.0.1"
 TOPIC_RECEIVE_FROM_DEVICES = "esp32/fl/model/push"
@@ -554,6 +556,7 @@ try:
             client.subscribe([(TOPIC_RECEIVE_FROM_DEVICES, 0)])
 
             print("Escutando mensagens MQTT... Pressione Ctrl+C para sair.")
+            print('\33]0;Listen - Servidor Federado\a', end='', flush=True)
             client.loop_forever()
         elif user_input == 'request':
             request_json = {
@@ -562,6 +565,7 @@ try:
             client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps(request_json))
             print("Enviando solicitação de pesos para os dispositivos...")
 
+            print('\33]0;Servidor Federado\a', end='', flush=True)
         elif user_input == 'federate':
             do_server()
         elif user_input == 'parse':
