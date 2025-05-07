@@ -223,6 +223,9 @@ def do_server():
         json_files = [f for f in files if f.endswith('.json')]
         times += 1
         if len(json_files) == len(federate_clients):
+            if (shared_state["max_federate_rounds"] == (federate_round+1)):
+                print("Número máximo de rodadas atingido, encerrando...")
+                break
             print("Todos os arquivos recebidos.")
             sleep(1)
             do_aggregate()
@@ -232,9 +235,6 @@ def do_server():
             # json_files = [f for f in files if f.endswith('.json')]
             # for file in json_files:
             #     os.remove(WEIGHTS_FOLDER + file)
-            if (shared_state["max_federate_rounds"] == federate_round):
-                print("Número máximo de rodadas atingido, encerrando...")
-                break
             federate_round += 1
             shared_state["federate_round"] = federate_round
             os.makedirs(federate_path + str(federate_round) + "/", exist_ok=True)
