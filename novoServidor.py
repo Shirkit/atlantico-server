@@ -118,7 +118,7 @@ def send_mqtt(data = None, filepath = None):
     except Exception as e:
         print(f"Erro ao enviar arquivos via MQTT: {e}")
 
-def do_aggregate():
+def do_aggregate(round=-1):
     files = os.listdir(WEIGHTS_FOLDER)
     global shared_state
     if shared_state and shared_state.get("federate"):
@@ -142,6 +142,8 @@ def do_aggregate():
         aggregated["precision"] = "float"
     aggregated["biases"] = []
     aggregated["weights"] = []
+    if round >= 0:
+        aggregated["round"] = round
 
     biaslen = len(json_data[0]["data"]["biases"])
     weightslen = len(json_data[0]["data"]["weights"])
@@ -219,6 +221,7 @@ def do_server():
     client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_start"}))
 
     times = 0
+    ttimes = 0
 
     while True:
         sleep(1)
@@ -232,7 +235,7 @@ def do_server():
                 break
             print("Todos os arquivos recebidos.")
             sleep(1)
-            do_aggregate()
+            do_aggregate(federate_round)
             send_mqtt(filepath=federate_path + str(federate_round) + "/" + "aggregated_weights.json")
             sleep(1)
             # files = os.listdir(WEIGHTS_FOLDER)
@@ -246,6 +249,7 @@ def do_server():
         elif times > 10:
             print((f"Arquivos recebidos: {len(json_files)} de {len(federate_clients)}"))
             times = 0
+            ttimes = ttimes + 1
 
     client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_end"}))
 
