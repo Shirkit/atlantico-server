@@ -1,7 +1,6 @@
 import json
 import paho.mqtt.client as mqtt
 from datetime import datetime
-from pprint import pprint
 from time import sleep
 import os
 import matplotlib.pyplot as plt
@@ -25,7 +24,8 @@ TOPIC_RECEIVE_COMMANDS_FROM_DEVICES = "esp32/fl/commands/push"
 TOPIC_SEND_TO_DEVICES = "esp32/fl/model/pull"
 TOPIC_SEND_COMMANDS_TO_DEVICES = "esp32/fl/commands/pull"
 PARSE_FOLDER = "parse/"
-WEIGHTS_FOLDER = "pesos/"
+WEIGHTS_FOLDER = "weights/"
+METRICS_FOLDER = "metrics/"
 
 federate_clients = []
 # ready_clients = []
@@ -369,7 +369,7 @@ def plot_metrics(json_data, metric_name="meanSqrdError"):
     
     # Save plot
     filename = f"plot_{metric_name}.png"
-    plt.savefig(filename)
+    plt.savefig(METRICS_FOLDER + filename)
     print(f"Plot saved as {filename}")
     plt.close()
     
@@ -409,7 +409,7 @@ def plot_multiple_metrics(json_data, client_id, metrics=["meanSqrdError", "accur
     plt.grid(True)
     
     filename = f"plot_client_{client_id}_metrics.png"
-    plt.savefig(filename)
+    plt.savefig(METRICS_FOLDER + filename)
     plt.close()
     # plt.show()
 
@@ -449,7 +449,7 @@ def plot_clients_heatmap(json_data, metric="meanSqrdError"):
     plt.xlabel("Round")
     plt.ylabel("Client")
     
-    plt.savefig(f"heatmap_{metric}.png")
+    plt.savefig(METRICS_FOLDER + f"heatmap_{metric}.png")
     plt.close()
     # plt.show()
 
@@ -505,7 +505,7 @@ def plot_training_efficiency_per_epoch(json_data):
     plt.grid(True, linestyle='--', alpha=0.7)
     
     plt.tight_layout()
-    plt.savefig("training_efficiency_per_epoch.png")
+    plt.savefig(METRICS_FOLDER + "training_efficiency_per_epoch.png")
     plt.close()
     # plt.show()
 
@@ -562,7 +562,7 @@ def plot_model_architecture(json_data):
                    ha="center", fontsize=10)
         
         plt.tight_layout()
-        plt.savefig(f"model_architecture_{arch_key}.png")
+        plt.savefig(METRICS_FOLDER + f"model_architecture_{arch_key}.png")
         plt.close()
         # plt.show()
 
@@ -625,7 +625,7 @@ def plot_training_speed_vs_complexity(json_data):
     plt.grid(True, linestyle='--', alpha=0.7)
     
     plt.tight_layout()
-    plt.savefig("training_speed_vs_complexity.png")
+    plt.savefig(METRICS_FOLDER + "training_speed_vs_complexity.png")
     plt.close()
     # plt.show()
 
@@ -675,7 +675,7 @@ def plot_processing_time_breakdown(json_data):
         plt.grid(True, axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
         
-        plt.savefig(f"time_breakdown_client_{client}.png")
+        plt.savefig(METRICS_FOLDER + f"time_breakdown_client_{client}.png")
         plt.close()
         # plt.show()
 
@@ -726,7 +726,7 @@ def plot_training_efficiency(json_data):
     plt.grid(True, linestyle='--', alpha=0.7)
     
     plt.tight_layout()
-    plt.savefig("training_efficiency.png")
+    plt.savefig(METRICS_FOLDER + "training_efficiency.png")
     plt.close()
     # plt.show()
 
@@ -799,7 +799,7 @@ def plot_average_metrics(json_data, metrics_to_plot=["meanSqrdError", "accuracy"
     
     # Save plot
     filename = "plot_average_metrics.png"
-    plt.savefig(filename)
+    plt.savefig(METRICS_FOLDER + filename)
     print(f"Plot saved as {filename}")
     plt.close()
     
@@ -832,7 +832,7 @@ def plot_average_metrics(json_data, metrics_to_plot=["meanSqrdError", "accuracy"
                         ha='center')
         
         filename = f"plot_average_{metric}.png"
-        plt.savefig(filename)
+        plt.savefig(METRICS_FOLDER + filename)
         print(f"Plot saved as {filename}")
         plt.close()
         # plt.show()
