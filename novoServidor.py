@@ -85,7 +85,7 @@ def save_to_json_file(data):
         else:
             filepath = WEIGHTS_FOLDER + clientname + ".json"
         with open(filepath, 'w') as json_file:
-            json.dump(output_data, json_file, indent=4)
+            json.dump(output_data, json_file, indent=4, separators=(',', ':'))
         print(f"Arquivo JSON salvo como {filepath}")
 
     except json.JSONDecodeError as e:
@@ -169,7 +169,7 @@ def do_aggregate(round=-1):
         aggregated_path = shared_state["federate_path"] + str(shared_state["federate_round"]) + "/aggregated_weights.json"
 
     with open(aggregated_path, 'w') as f:
-        json.dump(aggregated, f, indent=4)
+        json.dump(aggregated, f, indent=4, separators=(',', ':'))
     print(f"Pesos agregados salvos no arquivo {aggregated_path}")
 
 def do_server():
@@ -205,7 +205,7 @@ def do_server():
 
     for i in range(6):
         # client.loop()
-        client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_join"}))
+        client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_join"}, separators=(',', ':')))
         sleep(10)
     
     # client.loop()
@@ -218,7 +218,7 @@ def do_server():
 
     print(f"Federated learning round {federate_round} iniciado com {len(federate_clients)} clientes.")
 
-    client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_start"}))
+    client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_start"}, separators=(',', ':')))
 
     times = 0
     ttimes = 0
@@ -251,7 +251,7 @@ def do_server():
             times = 0
             ttimes = ttimes + 1
 
-    client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_end"}))
+    client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_end"}, separators=(',', ':')))
 
 def do_parse():
     found_files = [] 
@@ -863,7 +863,7 @@ try:
             request_json = {
                 "command": "request_model",
             }
-            client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps(request_json))
+            client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps(request_json, separators=(',', ':')))
             print("Enviando solicitação de pesos para os dispositivos...")
 
         elif user_input == 'federate':
