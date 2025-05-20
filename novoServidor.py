@@ -320,6 +320,7 @@ def do_parse():
         plot_training_efficiency_per_epoch(json_data)
         plot_model_architecture(json_data)
         plot_training_speed_vs_complexity(json_data)
+        plot_combined_processing_time_breakdown(json_data)
     except Exception as e:
         print(f"Error generating performance plots: {e}")
  
@@ -628,6 +629,188 @@ def plot_training_speed_vs_complexity(json_data):
     plt.savefig(METRICS_FOLDER + "training_speed_vs_complexity.png")
     plt.close()
     # plt.show()
+
+def plot_combined_processing_time_breakdown(json_data):
+    """
+    Plot combined time breakdown for all clients in a single graph,
+    allowing comparison between clients across rounds.
+    
+    Parameters:
+    - json_data: List of parsed JSON objects with timing data
+    """
+    # Extract all clients and rounds for organizing the plot
+    clients = sorted(set(item["client"] for item in json_data))
+    rounds = sorted(set(item.get("round", 0) for item in json_data))
+    
+    if not clients or not rounds:
+        print("No client or round data found for combined processing time plot")
+        return
+        
+    # Prepare data structures to hold timing information
+    training_data = np.zeros((len(clients), len(rounds)))
+    parsing_data = np.zeros((len(clients), len(rounds)))
+    construct_data = np.zeros((len(clients), len(rounds)))
+    
+    # Fill with NaN initially to handle missing data points
+    training_data[:] = np.nan
+    parsing_data[:] = np.nan
+    construct_data[:] = np.nan
+    
+    # Collect timing data for each client and round
+    for item in json_data:
+        if "timings" not in item:
+            continue
+            
+        client = item["client"]
+        round_num = item.get("round", 0)
+        
+        client_idx = clients.index(client)
+        round_idx = rounds.index(round_num)
+        
+        timings = item["timings"]
+        
+        # Convert milliseconds to seconds
+        if "training" in timings:
+            training_data[client_idx, round_idx] = timings["training"] / 1000
+        if "parsing" in timings:
+            parsing_data[client_idx, round_idx] = timings["parsing"] / 1000
+        if "previousConstruct" in timings:
+            construct_data[client_idx, round_idx] = timings["previousConstruct"] / 1000
+    
+    # Color map for different clients
+    colors = plt.cm.tab10(np.linspace(0, 1, len(clients)))
+    
+    # Create four separate plots
+    
+    # 1. Training time plot
+    fig_training, ax_training = plt.subplots(figsize=(12, 6))
+    for i, client in enumerate(clients):
+        ax_training.plot(rounds, training_data[i], 'o-', linewidth=2, 
+                label=f"Cliente {client}", color=colors[i])
+    ax_training.set_title('Tempo de Treinamento por Round', fontsize=14)
+    ax_training.set_ylabel('Tempo (segundos)')
+    ax_training.set_xlabel('Round')
+    ax_training.grid(True, linestyle='--', alpha=0.7)
+    ax_training.legend(loc='upper left')
+    ax_training.set_xticks(rounds)
+    ax_training.set_xticklabels([f'Round {r}' for r in rounds])
+    plt.tight_layout()
+    plt.savefig(METRICS_FOLDER + "combined_training_time.png")
+    print("Plot saved as combined_training_time.png")
+    plt.close(fig_training)
+    
+    # 2. Parsing time plot
+    fig_parsing, ax_parsing = plt.subplots(figsize=(12, 6))
+    for i, client in enumerate(clients):
+        ax_parsing.plot(rounds, parsing_data[i], 'o-', linewidth=2, 
+                label=f"Cliente {client}", color=colors[i])
+    ax_parsing.set_title('Tempo de Parsing por Round', fontsize=14)
+    ax_parsing.set_ylabel('Tempo (segundos)')
+    ax_parsing.set_xlabel('Round')
+    ax_parsing.grid(True, linestyle='--', alpha=0.7)
+    ax_parsing.legend(loc='upper left')
+    ax_parsing.set_xticks(rounds)
+    ax_parsing.set_xticklabels([f'Round {r}' for r in rounds])
+    plt.tight_layout()
+    plt.savefig(METRICS_FOLDER + "combined_parsing_time.png")
+    print("Plot saved as combined_parsing_time.png")
+    plt.close(fig_parsing)
+    
+    # 3. Construction time plot
+    fig_construct, ax_construct = plt.subplots(figsize=(12, 6))
+    for i, client in enumerate(clients):
+        ax_construct.plot(rounds, construct_data[i], 'o-', linewidth=2, 
+                label=f"Cliente {client}", color=colors[i])
+    ax_construct.set_title('Tempo de Construção do Modelo por Round', fontsize=14)
+    ax_construct.set_xlabel('Round')
+    ax_construct.set_ylabel('Tempo (segundos)')
+    ax_construct.grid(True, linestyle='--', alpha=0.7)
+    ax_construct.legend(loc='upper left')
+    ax_construct.set_xticks(rounds)
+    ax_construct.set_xticklabels([f'Round {r}' for r in rounds])
+    plt.tight_layout()
+    plt.savefig(METRICS_FOLDER + "combined_construction_time.png")
+    print("Plot saved as combined_construction_time.png")
+    plt.close(fig_construct)
+    
+    # 4. Total time stacked bar chart
+    fig_total, ax_total = plt.subplots(figsize=(14, 8))
+    
+    # Calculate positions for grouped bars
+    bar_width = 0.8 / len(clients)
+    client_positions = {}
+    
+    # Create grouped stacked bars
+    for i, client in enumerate(clients):
+        bottom = np.zeros(len(rounds))
+        positions = np.arange(len(rounds)) - 0.4 + (i + 0.5) * bar_width
+        client_positions[client] = positions
+        
+        # Training time (bottom part)
+        training_vals = np.nan_to_num(training_data[i], nan=0)
+        ax_total.bar(positions, training_vals, bar_width, bottom=bottom,
+                    label=f'Treinamento ({client})' if i == 0 else "", 
+                    color='#3274A1', alpha=0.7)
+        bottom += training_vals
+        
+        # Parsing time (middle part)
+        parsing_vals = np.nan_to_num(parsing_data[i], nan=0)
+        ax_total.bar(positions, parsing_vals, bar_width, bottom=bottom,
+                    label=f'Parsing ({client})' if i == 0 else "", 
+                    color='#E1812C', alpha=0.7)
+        bottom += parsing_vals
+        
+        # Construct time (top part)
+        construct_vals = np.nan_to_num(construct_data[i], nan=0)
+        ax_total.bar(positions, construct_vals, bar_width, bottom=bottom,
+                    label=f'Construção ({client})' if i == 0 else "", 
+                    color='#3A923A', alpha=0.7)
+    
+    # Add client labels
+    # for i, client in enumerate(clients):
+    #     positions = client_positions[client]
+    #     # Add client label in the middle of their group
+    #     if len(rounds) > 0:
+    #         ax_total.text(np.mean(positions), -2, f"Cliente {client}", 
+    #                      ha='center', va='top', fontsize=10, 
+    #                      color=colors[i], fontweight='bold')
+    
+    ax_total.set_title('Tempo Total de Processamento por Cliente e Round', fontsize=14)
+    ax_total.set_xlabel('Round')
+    ax_total.set_ylabel('Tempo Total (segundos)')
+    ax_total.set_xticks(np.arange(len(rounds)))
+    ax_total.set_xticklabels([f'Round {r}' for r in rounds])
+    ax_total.grid(True, axis='y', linestyle='--', alpha=0.7)
+    
+    # Create a custom legend for client colors
+    # client_handles = [plt.Line2D([0], [0], color=colors[i], lw=4, label=f'Cliente {client}') 
+    #                  for i, client in enumerate(clients)]
+    
+    # Add a legend with both phase and client information
+    phase_handles = [plt.Rectangle((0,0), 1, 1, color=c, alpha=0.7) 
+                    for c in ['#3274A1', '#E1812C', '#3A923A']]
+    phase_labels = ['Treinamento', 'Parsing', 'Construção']
+    
+    # Position both legends properly
+    # legend1 = ax_total.legend(handles=client_handles, title="Clientes", 
+    #                          loc='upper right', bbox_to_anchor=(1.15, 1))
+    # ax_total.add_artist(legend1)
+    
+    # Second legend for phases
+    legend2 = ax_total.legend(handles=phase_handles, labels=phase_labels, 
+                             title="Fases", loc='upper right',
+                             bbox_to_anchor=(1.15, 0.7))
+    ax_total.add_artist(legend2)
+    
+    # Adjust layout
+    plt.tight_layout()
+    fig_total.subplots_adjust(right=0.85)
+    
+    # Save the plot
+    plt.savefig(METRICS_FOLDER + "combined_total_time.png")
+    print("Plot saved as combined_total_time.png")
+    
+    plt.close(fig_total)
 
 def plot_processing_time_breakdown(json_data):
     """Plot time breakdown for different processing stages"""
