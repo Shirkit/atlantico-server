@@ -12,22 +12,18 @@ from collections import defaultdict
 # Variável para armazenar os dados recebidos
 shared_state = {}
 
-federate = False
-federate_round = 0
-federate_path = ""
-
 print('\33]0;Escolha comando\a', end='', flush=True)
 
 BROKER_IP = "127.0.0.1"
 TOPIC_RECEIVE_FROM_DEVICES = "esp32/fl/model/push"
-TOPIC_RECEIVE_COMMANDS_FROM_DEVICES = "esp32/fl/commands/push"
 TOPIC_SEND_TO_DEVICES = "esp32/fl/model/pull"
+TOPIC_RECEIVE_COMMANDS_FROM_DEVICES = "esp32/fl/commands/push"
 TOPIC_SEND_COMMANDS_TO_DEVICES = "esp32/fl/commands/pull"
+TOPIC_RESUME_TO_DEVICES = "esp32/fl/model/resume"
 PARSE_FOLDER = "parse/"
 WEIGHTS_FOLDER = "weights/"
 METRICS_FOLDER = "metrics/"
 
-federate_clients = []
 # ready_clients = []
 
 def dump(obj):
@@ -52,18 +48,31 @@ def on_message(client, userdata, message):
             parse_command(payload)
     except UnicodeDecodeError:
         print("Erro ao decodificar a mensagem. Ignorando...")
+    except json.JSONDecodeError:
+        print("Erro ao decodificar JSON. Ignorando...")
 
 def parse_command(payload):
     msg = json.loads(payload)
     if "command" in msg:
+        global shared_state
         if msg["command"] == "join":
-            if (msg["client"] not in federate_clients):
-                federate_clients.append(msg["client"])
+            if (msg["client"] not in shared_state["federate_clients"]):
+                shared_state["federate_clients"].append(msg["client"])
                 print(f"Cliente {msg['client']} se juntou ao servidor.")
         elif msg["command"] == "leave":
-            if (msg["client"] in federate_clients):
-                federate_clients.remove(msg["client"])
+            if (msg["client"] in shared_state["federate_clients"]):
+                shared_state["federate_clients"].remove(msg["client"])
                 print(f"Cliente {msg['client']} saiu do servidor.")
+        elif msg["command"] == "resume":
+            if (msg["client"] in shared_state["federate_clients"]):
+                print(f"Cliente {msg['client']} está pronto para continuar.")
+                try:
+                    send_mqtt(topic=TOPIC_SEND_COMMANDS_TO_DEVICES, data=json.dumps({"command": "federate_resume", "client": msg["client"], "round": shared_state["federate_round"] }, separators=(',', ':')))
+                    send_mqtt(topic=TOPIC_RESUME_TO_DEVICES, filepath=shared_state["federate_path"] + str(shared_state["federate_round"] - 1) + "/" + "aggregated_weights.json")
+                except Exception as e:
+                    print(f"Erro ao enviar arquivo de pesos: {e}")
+
+                
         # elif msg["command"] == "ready":
         #     if (msg["client"] not in ready_clients) and (msg["client"] in federate_clients):
         #         ready_clients.append(msg["client"])
@@ -105,16 +114,16 @@ def read_file(caminho_arquivo):
         print(f"Erro ao ler o arquivo {caminho_arquivo}: {e}")
         return None
 
-def send_mqtt(data = None, filepath = None):
+def send_mqtt(data = None, filepath = None, topic = TOPIC_SEND_TO_DEVICES):
     try:
         if filepath:
             new_weights = read_file(filepath)
             if new_weights:
                 print("Enviando arquivo " + filepath + " via MQTT...")
-                client.publish(TOPIC_SEND_TO_DEVICES, new_weights)
+                client.publish(topic, new_weights)
         if data:
             print("Enviando dados via MQTT...")
-            client.publish(TOPIC_SEND_TO_DEVICES, data)
+            client.publish(topic, data)
     except Exception as e:
         print(f"Erro ao enviar arquivos via MQTT: {e}")
 
@@ -189,6 +198,7 @@ def do_server():
     shared_state["federate_path"] = federate_path
     shared_state["federate_round"] = federate_round
     shared_state["federate"] = federate
+    shared_state["federate_clients"] = []
 
     shared_state["max_federate_rounds"] = int(input("\nDigite o número de rodadas que quer fazer o processo federativo: "))
 
@@ -210,13 +220,13 @@ def do_server():
     
     # client.loop()
 
-    if len(federate_clients) < 1:
+    if len(shared_state["federate_clients"]) < 1:
         print("Nenhum cliente inscrito, encerrando...")
         return
 
     os.makedirs(federate_path + str(federate_round) + "/", exist_ok=True)
 
-    print(f"Federated learning round {federate_round} iniciado com {len(federate_clients)} clientes.")
+    print(f"Federated learning round {federate_round} iniciado com {len(shared_state["federate_clients"])} clientes.")
 
     client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_start"}, separators=(',', ':')))
 
@@ -229,7 +239,7 @@ def do_server():
         files = os.listdir(federate_path + str(federate_round) + "/")
         json_files = [f for f in files if f.endswith('.json')]
         times += 1
-        if len(json_files) == len(federate_clients):
+        if len(json_files) == len(shared_state["federate_clients"]):
             if (shared_state["max_federate_rounds"] == (federate_round+1)):
                 print("Número máximo de rodadas atingido, encerrando...")
                 break
@@ -247,9 +257,10 @@ def do_server():
             os.makedirs(federate_path + str(federate_round) + "/", exist_ok=True)
             print(f"Pesos enviados, iniciando próximo round: {federate_round}")
         elif times > 10:
-            print((f"Arquivos recebidos: {len(json_files)} de {len(federate_clients)}"))
+            print((f"Arquivos recebidos: {len(json_files)} de {len(shared_state["federate_clients"])}"))
             times = 0
             ttimes = ttimes + 1
+            # client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_waiting", "for":waiting}, separators=(',', ':')))
 
     client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_end"}, separators=(',', ':')))
 
@@ -1037,7 +1048,7 @@ try:
 
             # Inscreve-se nos tópicos de interesse
             # client.subscribe([(TOPIC_RECEIVE_FROM_DEVICES, 0), (TOPIC_SEND_TO_DEVICES, 0)])
-            client.subscribe([(TOPIC_RECEIVE_FROM_DEVICES, 0)])
+            client.subscribe([(TOPIC_RECEIVE_FROM_DEVICES, 0), (TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)])
 
             print("Escutando mensagens MQTT... Pressione Ctrl+C para sair.")
             print('\33]0;Listen - Servidor Federado\a', end='', flush=True)
