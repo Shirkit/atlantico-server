@@ -8,6 +8,9 @@ import re
 import seaborn as sns
 import numpy as np
 from collections import defaultdict
+import uuid
+import traceback
+import math
 
 # Variável para armazenar os dados recebidos
 shared_state = {}
@@ -16,6 +19,7 @@ print('\33]0;Escolha comando\a', end='', flush=True)
 
 BROKER_IP = "127.0.0.1"
 TOPIC_RECEIVE_FROM_DEVICES = "esp32/fl/model/push"
+TOPIC_RECEIVE_FROM_DEVICES_RAW = "esp32/fl/model/rawpush/+"
 TOPIC_SEND_TO_DEVICES = "esp32/fl/model/pull"
 TOPIC_RECEIVE_COMMANDS_FROM_DEVICES = "esp32/fl/commands/push"
 TOPIC_SEND_COMMANDS_TO_DEVICES = "esp32/fl/commands/pull"
@@ -37,28 +41,47 @@ def on_connect(client, userdata, flags, rc):
 # Função chamada quando uma mensagem MQTT é recebida
 def on_message(client, userdata, message):
     try:
-        payload = message.payload.decode("utf-8")
         topic = message.topic
-
         topic_parts = message.topic.split('/')
-        if (topic_parts[2] == "model"):
-            # save_file(payload, client)
-            save_to_json_file(payload)
-        elif (topic_parts[2] == "commands"):
-            parse_command(payload)
-    except UnicodeDecodeError:
-        print("Erro ao decodificar a mensagem. Ignorando...")
-    except json.JSONDecodeError:
-        print("Erro ao decodificar JSON. Ignorando...")
+        print("Mensagem recebida no tópico " + topic)
+        if topic_parts[3] == "rawpush":
+            global shared_state
+            clientname = topic_parts[4]
+            filepath = ""
+            if shared_state and shared_state.get("federate") is True:
+                filepath = shared_state["federate_path"] + str(shared_state["federate_round"]) + "/" + clientname + ".nn"
+            else:
+                filepath = WEIGHTS_FOLDER + clientname + ".nn"
+            
+            with open(filepath, 'wb') as f:
+                f.write(message.payload)
+
+            if os.path.exists(os.path.dirname(filepath.replace(".nn", ".json"))):
+                if shared_state.get("waiting_for") and clientname in shared_state["waiting_for"]:
+                    shared_state["waiting_for"].remove(clientname)
+        else:
+            payload = message.payload.decode("utf-8")
+            if (topic_parts[2] == "model"):
+                save_to_json_file(payload)
+            elif (topic_parts[2] == "commands"):
+                parse_command(payload)
+    except UnicodeDecodeError as e:
+        print("Erro ao decodificar a mensagem recebida:")
+        print(message.payload)
+        print(e)
+    except json.JSONDecodeError as e:
+        print("Erro ao decodificar JSON da mensagem:")
+        print(message.payload)
+        print(e)
 
 def parse_command(payload):
     msg = json.loads(payload)
-    if "command" in msg:
-        global shared_state
+    global shared_state
+    if "command" in msg and "federate" in shared_state and shared_state["federate"] is True:
         if msg["command"] == "join":
             if (msg["client"] not in shared_state["federate_clients"]):
                 shared_state["federate_clients"].append(msg["client"])
-                print(f"Cliente {msg['client']} se juntou ao servidor.")
+                print(f"Cliente {msg['client']} se juntou ao servidor. Total de clientes: {len(shared_state['federate_clients'])}")
         elif msg["command"] == "leave":
             if (msg["client"] in shared_state["federate_clients"]):
                 shared_state["federate_clients"].remove(msg["client"])
@@ -71,6 +94,17 @@ def parse_command(payload):
                     send_mqtt(topic=TOPIC_RESUME_TO_DEVICES, filepath=shared_state["federate_path"] + str(shared_state["federate_round"] - 1) + "/" + "aggregated_weights.json")
                 except Exception as e:
                     print(f"Erro ao enviar arquivo de pesos: {e}")
+        elif msg["command"] == "alive":
+            if (msg["client"] in shared_state["federate_clients"]):
+                print(f"Cliente {msg['client']} está ativo.")
+    elif msg["command"] == "alive":
+        if msg['client'] not in shared_state["alive"]:
+            shared_state["alive"].append(msg["client"])
+            shared_state["alive"].sort()
+        print(f"Total de Clientes ativos: {len(shared_state["alive"])} {shared_state["alive"]}")
+    else:
+        print("Comando não reconhecido ou federated learning não está ativo.")
+        print(payload)
 
                 
         # elif msg["command"] == "ready":
@@ -80,22 +114,31 @@ def parse_command(payload):
 
 def save_to_json_file(data):
     try:
+        loaded = json.loads(data)
         output_data = {
             "received_time": datetime.now().isoformat(),
-            "data": json.loads(data),
+            "data": loaded,
         }
         clientname = output_data["data"]["client"]
         filepath = ""
 
         global shared_state
 
+        if os.path.exists(filepath.replace(".json", ".nn")):
+            if shared_state.get("waiting_for") and clientname in shared_state["waiting_for"]:
+                shared_state["waiting_for"].remove(clientname)
+
         if shared_state and shared_state.get("federate") is True:
             filepath = shared_state["federate_path"] + str(shared_state["federate_round"]) + "/" + clientname + ".json"
         else:
             filepath = WEIGHTS_FOLDER + clientname + ".json"
-        with open(filepath, 'w') as json_file:
-            json.dump(output_data, json_file, indent=4, separators=(',', ':'))
-        print(f"Arquivo JSON salvo como {filepath}")
+        try:
+            with open(filepath, 'x') as json_file:
+                json.dump(output_data, json_file, indent=4, separators=(',', ':'))
+            print(f"Arquivo JSON salvo como {filepath}")
+        except FileExistsError:
+            # Por algum motivo recebemos o mesmo arquivo duas vezes, ignorando
+            pass
 
     except json.JSONDecodeError as e:
         print(f"Erro ao decodificar JSON: {e}")
@@ -157,21 +200,31 @@ def do_aggregate(round=-1):
     biaslen = len(json_data[0]["data"]["biases"])
     weightslen = len(json_data[0]["data"]["weights"])
 
+    skip = []
+    for i in range(len(json_data)):
+        if json_data[i]["data"]["metrics"]["meanSqrdError"] is None or math.isnan(json_data[i]["data"]["metrics"]["meanSqrdError"]):
+            skip.append(i)
+            continue
+
     # ! Innefficient 2*n² loops
 
     for i in range(biaslen):
         aggregated["biases"].append(0)
         for k in range (len(json_data)):
+            if k in skip:
+                continue
             # ? is this aggregation policy good?
             aggregated["biases"][i] += float(json_data[k]["data"]["biases"][i])
-        aggregated["biases"][i] = aggregated["biases"][i] / len(json_data)
+        aggregated["biases"][i] = aggregated["biases"][i] / (len(json_data) - len(skip))
 
     for i in range(weightslen):
         aggregated["weights"].append(0)
         for k in range (len(json_data)):
+            if k in skip:
+                continue
             # ? is this aggregation policy good?
             aggregated["weights"][i] += float(json_data[k]["data"]["weights"][i])
-        aggregated["weights"][i] = aggregated["weights"][i] / len(json_data)
+        aggregated["weights"][i] = aggregated["weights"][i] / (len(json_data) - len(skip))
 
     aggregated_path = WEIGHTS_FOLDER + "aggregated_weights.json"
     if shared_state and shared_state.get("federate"):
@@ -187,7 +240,7 @@ def do_server():
     client.on_message = on_message
     client.on_connect = on_connect
 
-    client.subscribe([(TOPIC_RECEIVE_FROM_DEVICES, 0), (TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)])
+    client.subscribe([(TOPIC_RECEIVE_FROM_DEVICES, 0), (TOPIC_RECEIVE_FROM_DEVICES_RAW, 0), (TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)])
 
     client.loop_start()
 
@@ -202,6 +255,8 @@ def do_server():
 
     shared_state["max_federate_rounds"] = int(input("\nDigite o número de rodadas que quer fazer o processo federativo: "))
 
+    expected_clients = int(input("Digite o número de clientes que você espera se conectar: "))
+
     os.makedirs(federate_path, exist_ok=True)
     os.makedirs(federate_path + str(federate_round) + "/", exist_ok=True)
 
@@ -211,41 +266,85 @@ def do_server():
     # for file in json_files:
     #     os.remove(WEIGHTS_FOLDER + file)
 
-    print("Aguardando 60 segundos para os dispositivos se conectarem...")
+    print("Aguardando 10 segundos para os dispositivos se conectarem...")
 
-    for i in range(6):
+    for i in range(3):
         # client.loop()
         client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_join"}, separators=(',', ':')))
-        sleep(10)
-    
+        sleep(3)
+ 
     # client.loop()
 
     if len(shared_state["federate_clients"]) < 1:
         print("Nenhum cliente inscrito, encerrando...")
         return
 
+    if len(shared_state["federate_clients"]) < expected_clients:
+        print("Número de clientes inscritos é menor que o esperado, encerrando...")
+        for i in range(5):
+            client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_unsubscribe"}, separators=(',', ':')))
+            sleep(1)
+        return
+
     os.makedirs(federate_path + str(federate_round) + "/", exist_ok=True)
 
     print(f"Federated learning round {federate_round} iniciado com {len(shared_state["federate_clients"])} clientes.")
+    
+    start_command = {
+        "command": "federate_start",
+        "config": {
+            # "layers": [3, 192, 96, 48, 24, 12, 6],
+            # "layers": [3, 54, 27, 13, 6],
+            "layers": [3, 9, 6],
+            # "actvFunctions": [1, 1, 1, 1, 1, 6],
+            # "actvFunctions": [1, 1, 1, 6],
+            "actvFunctions": [1, 6],
+            "epochs": 1,
+            "learningRateOfWeights": 0.3333 / 12.0,
+            "learningRateOfBiases": 0.0666 / 12.0,
+            "randomSeed": 10
+        }
+    }
 
-    client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_start"}, separators=(',', ':')))
+    shared_state["waiting_for"] = []
+
+    for waiting in shared_state["federate_clients"]:
+        shared_state["waiting_for"].append(waiting)
+
+    print(f"Configuração do processo federativo: {start_command["config"]}")
+    client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps(start_command, separators=(',', ':')))
+
+    device_count = len(shared_state["federate_clients"])
+
+    start_command["config"]["devices"] = shared_state["federate_clients"]
+    start_command["config"]["devices"].sort()
+    neurons = 0
+    for i in range (len(start_command["config"]["layers"]) - 1):
+        neurons = neurons + start_command["config"]["layers"][i] * start_command["config"]["layers"][i+1]
+    start_command["config"]["neurons"] = neurons
+    start_command["config"]["device_count"] = device_count
+    start_command["config"]["bits"] = "32"
+    start_command["config"]["run"] = "X"
+
+    json.dump(start_command, open(federate_path + "/config.json", 'w'), indent=4, separators=(',', ':'))
 
     times = 0
-    ttimes = 0
 
     while True:
         sleep(1)
         # client.loop()
-        files = os.listdir(federate_path + str(federate_round) + "/")
-        json_files = [f for f in files if f.endswith('.json')]
+        # files = os.listdir(federate_path + str(federate_round) + "/")
+        # json_files = [f for f in files if f.endswith('.json')]
         times += 1
-        if len(json_files) == len(shared_state["federate_clients"]):
+        # if len(json_files) == len(shared_state["federate_clients"]):
+        if len(shared_state["waiting_for"]) == 0:
             if (shared_state["max_federate_rounds"] == (federate_round+1)):
                 print("Número máximo de rodadas atingido, encerrando...")
+                do_aggregate(federate_round)
                 break
             print("Todos os arquivos recebidos.")
             sleep(1)
-            do_aggregate(federate_round)
+            do_aggregate(federate_round) # TODO Explosão do Gradiente lança um erro e crasha o processo federativo
             send_mqtt(filepath=federate_path + str(federate_round) + "/" + "aggregated_weights.json")
             sleep(1)
             # files = os.listdir(WEIGHTS_FOLDER)
@@ -255,14 +354,27 @@ def do_server():
             federate_round += 1
             shared_state["federate_round"] = federate_round
             os.makedirs(federate_path + str(federate_round) + "/", exist_ok=True)
+            shared_state["waiting_for"].clear()
+            for waiting in shared_state["federate_clients"]:
+                shared_state["waiting_for"].append(waiting)
             print(f"Pesos enviados, iniciando próximo round: {federate_round}")
-        elif times > 10:
-            print((f"Arquivos recebidos: {len(json_files)} de {len(shared_state["federate_clients"])}"))
+        elif times > 20:
+            print(f"Arquivos recebidos: {device_count - len(shared_state["waiting_for"])} de {device_count}. Aguardando pelos clientes: {shared_state["waiting_for"]}")
             times = 0
-            ttimes = ttimes + 1
+            # client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_waiting", "clients":shared_state["waiting_for"]}, separators=(',', ':')))
             # client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_waiting", "for":waiting}, separators=(',', ':')))
 
+    federate_round += 1
+    shared_state["federate_round"] = federate_round
+    os.makedirs(federate_path + str(federate_round) + "/", exist_ok=True)
+
     client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_end"}, separators=(',', ':')))
+
+    sleep(5)
+
+    client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_unsubscribe"}, separators=(',', ':')))
+
+    json.dump({}, open(federate_path + "/done.json", 'x'), indent=4, separators=(',', ':'))
 
 def do_parse():
     found_files = [] 
@@ -298,6 +410,7 @@ def do_parse():
                 data["datasetSize"] = data["data"]["datasetSize"]
                 data["model"] = data["data"]["model"]
                 data["epochs"] = data["data"]["epochs"]
+                data["memory"] = data["data"]["memory"]
                 data["data"] = None
                 json_data.append(data)
                 print(data)
@@ -332,9 +445,11 @@ def do_parse():
         plot_model_architecture(json_data)
         plot_training_speed_vs_complexity(json_data)
         plot_combined_processing_time_breakdown(json_data)
+        plot_fixed_memory_metrics(json_data)
+        plot_round_memory_metrics(json_data)
     except Exception as e:
         print(f"Error generating performance plots: {e}")
- 
+        print(traceback.format_exc())
 
 def plot_metrics(json_data, metric_name="meanSqrdError"):
     """
@@ -478,6 +593,8 @@ def plot_training_efficiency_per_epoch(json_data):
         if "timings" in item and "training" in item["timings"]:
             training_time = item["timings"]["training"] / 1000  # seconds
             dataset_size = item["datasetSize"]
+            if not dataset_size:
+                continue  # Skip if dataset size is zero
             epochs = item["epochs"]
             
             # Calculate time per sample per epoch
@@ -1031,14 +1148,258 @@ def plot_average_metrics(json_data, metrics_to_plot=["meanSqrdError", "accuracy"
         plt.close()
         # plt.show()
 
+def plot_fixed_memory_metrics(json_data):
+    """
+    Plot fixed memory metrics as a single bar chart showing average values across all devices.
+    These are boot-time memory measurements that remain constant per device.
+    Units displayed in KB.
+    """
+    # Extract fixed memory metrics
+    fixed_metrics = {}
+    clients = set()
+    
+    for item in json_data:
+        if "memory" in item and "fixed" in item["memory"]:
+            client = item["client"]
+            clients.add(client)
+            
+            for metric_name, value in item["memory"]["fixed"].items():
+                if metric_name not in fixed_metrics:
+                    fixed_metrics[metric_name] = []
+                
+                # Convert bytes to KB safely
+                if value is not None and value > 0:
+                    kb_value = value / 1024
+                else:
+                    kb_value = 0.0
+                
+                fixed_metrics[metric_name].append(kb_value)
+    
+    if not fixed_metrics:
+        print("No fixed memory metrics found")
+        return
+    
+    # Calculate average for each metric across all clients and rounds
+    metric_names = []
+    metric_averages = []
+    
+    for metric_name, values in fixed_metrics.items():
+        # Filter out zero values for average calculation if there are non-zero values
+        non_zero_values = [v for v in values if v > 0]
+        if non_zero_values:
+            avg_value = sum(non_zero_values) / len(non_zero_values)
+        else:
+            # If all values are zero, keep it as zero
+            avg_value = 0.0
+        
+        metric_names.append(metric_name.replace("_", " ").title())
+        metric_averages.append(avg_value)
+    
+    # Create single bar chart
+    plt.figure(figsize=(14, 8))
+    
+    # Use different colors for each bar
+    colors = plt.cm.Set3(np.linspace(0, 1, len(metric_names)))
+    
+    bars = plt.bar(metric_names, metric_averages, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
+    
+    # Add value labels on top of bars
+    for bar, value in zip(bars, metric_averages):
+        height = bar.get_height()
+        if height > 0:
+            plt.text(bar.get_x() + bar.get_width()/2., height + max(metric_averages) * 0.01,
+                    f'{value:.1f} KB', ha='center', va='bottom', fontsize=11, fontweight='bold')
+        else:
+            plt.text(bar.get_x() + bar.get_width()/2., max(metric_averages) * 0.02,
+                    'N/A', ha='center', va='bottom', fontsize=11, color='red', fontweight='bold')
+    
+    # Customize the plot
+    plt.title('Average Fixed Memory Metrics Across All Devices', fontsize=16, fontweight='bold', pad=20)
+    plt.ylabel('Memory (KB)', fontsize=14)
+    plt.xlabel('Memory Metrics', fontsize=14)
+    
+    # Add grid for better readability
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    
+    # Set y-axis to start from 0 and add some padding at the top
+    if max(metric_averages) > 0:
+        plt.ylim(bottom=0, top=max(metric_averages) * 1.15)
+    else:
+        plt.ylim(bottom=0, top=100)  # Default range if all values are 0
+    
+    # Rotate x-axis labels for better readability
+    plt.xticks(rotation=45, ha='right')
+    
+    # Add some statistics as text
+    total_clients = len(clients)
+    total_measurements = sum(len(values) for values in fixed_metrics.values())
+    
+    plt.figtext(0.02, 0.02, f'Based on {total_measurements} measurements from {total_clients} clients', 
+               fontsize=10, style='italic', alpha=0.7)
+    
+    # Adjust layout to prevent label cutoff
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)
+    
+    # Save the plot
+    plt.savefig(METRICS_FOLDER + "fixed_memory_metrics.png", dpi=300, bbox_inches='tight')
+    print("Plot saved as fixed_memory_metrics.png")
+    plt.close()
+
+def plot_round_memory_metrics(json_data):
+    """
+    Plot round-based memory metrics as a single line chart showing average evolution across federation rounds.
+    Each line represents the average of all devices for one metric.
+    Units displayed in KB.
+    """
+    # Extract round memory metrics
+    round_metrics = {}
+    rounds = set()
+    
+    for item in json_data:
+        if "memory" in item and "round" in item["memory"]:
+            round_num = item.get("round", 0)
+            rounds.add(round_num)
+            
+            for metric_name, value in item["memory"]["round"].items():
+                if metric_name not in round_metrics:
+                    round_metrics[metric_name] = {}
+                
+                if round_num not in round_metrics[metric_name]:
+                    round_metrics[metric_name][round_num] = []
+                
+                # Convert bytes to KB safely
+                if value is not None and value > 0:
+                    kb_value = value / 1024
+                else:
+                    kb_value = 0.0
+                
+                round_metrics[metric_name][round_num].append(kb_value)
+    
+    if not round_metrics:
+        print("No round memory metrics found")
+        return
+    
+    rounds_list = sorted(list(rounds))
+    
+    # Calculate averages for each metric per round
+    metric_averages = {}
+    for metric_name, round_data in round_metrics.items():
+        metric_averages[metric_name] = []
+        
+        for round_num in rounds_list:
+            if round_num in round_data:
+                values = round_data[round_num]
+                # Filter out zero values for average calculation if there are non-zero values
+                non_zero_values = [v for v in values if v > 0]
+                if non_zero_values:
+                    avg_value = sum(non_zero_values) / len(non_zero_values)
+                else:
+                    # If all values are zero, keep it as zero
+                    avg_value = 0.0
+            else:
+                avg_value = 0.0
+            
+            metric_averages[metric_name].append(avg_value)
+    
+    # Create single line chart
+    plt.figure(figsize=(14, 8))
+    
+    # Use different colors and line styles for each metric
+    colors = plt.cm.tab10(np.linspace(0, 1, len(metric_averages)))
+    line_styles = ['-', '--', '-.', ':', '-', '--']  # Cycle through different line styles
+    markers = ['o', 's', '^', 'D', 'v', 'p']  # Different markers for each line
+    
+    # Plot each metric
+    for idx, (metric_name, averages) in enumerate(metric_averages.items()):
+        color = colors[idx % len(colors)]
+        line_style = line_styles[idx % len(line_styles)]
+        marker = markers[idx % len(markers)]
+        
+        label = metric_name.replace("_", " ").title()
+        
+        plt.plot(rounds_list, averages, 
+                color=color, 
+                linestyle=line_style, 
+                marker=marker, 
+                linewidth=2.5, 
+                markersize=8, 
+                label=label,
+                alpha=0.8)
+        
+        # Add value annotations for each point
+        # for round_num, avg_value in zip(rounds_list, averages):
+        #     if avg_value > 0:  # Only annotate non-zero values
+        #         plt.annotate(f'{avg_value:.1f}', 
+        #                    (round_num, avg_value), 
+        #                    textcoords="offset points", 
+        #                    xytext=(0, 15), 
+        #                    ha='center', 
+        #                    fontsize=9, 
+        #                    color=color,
+        #                    alpha=0.8)
+    
+    # Customize the plot
+    plt.title('Average Round Memory Metrics Evolution Across Federation Rounds', 
+             fontsize=16, fontweight='bold', pad=20)
+    plt.ylabel('Memory (KB)', fontsize=14)
+    plt.xlabel('Round', fontsize=14)
+    
+    # Add grid for better readability
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    # Customize x-axis
+    plt.xticks(rounds_list, [f'Round {r}' for r in rounds_list])
+    
+    # Set y-axis to start from 0
+    all_values = [val for averages in metric_averages.values() for val in averages if val > 0]
+    if all_values:
+        plt.ylim(bottom=0, top=max(all_values) * 1.2)
+    else:
+        plt.ylim(bottom=0, top=100)  # Default range if all values are 0
+    
+    # Add legend
+    plt.legend(loc='best', frameon=True, fancybox=True, shadow=True, fontsize=11)
+    
+    # Add some statistics as text
+    total_metrics = len(round_metrics)
+    total_rounds = len(rounds_list)
+    
+    plt.figtext(0.02, 0.02, 
+               f'Showing averages across all devices for {total_metrics} metrics over {total_rounds} rounds', 
+               fontsize=10, style='italic', alpha=0.7)
+    
+    # Add special annotation for Round 0 if it exists and has zero values
+    if 0 in rounds_list:
+        zero_metrics = []
+        for metric_name, averages in metric_averages.items():
+            if averages[rounds_list.index(0)] == 0:
+                zero_metrics.append(metric_name)
+        
+        if zero_metrics:
+            plt.figtext(0.02, 0.95, 
+                       f'Round 0 note: {len(zero_metrics)} metrics show zero values (initialization)', 
+                       fontsize=10, 
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7),
+                       transform=plt.gca().transAxes)
+    
+    # Adjust layout
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
+    
+    # Save the plot
+    plt.savefig(METRICS_FOLDER + "round_memory_metrics.png", dpi=300, bbox_inches='tight')
+    print("Plot saved as round_memory_metrics.png")
+    plt.close()
+
 # Configuração do cliente MQTT
-client = mqtt.Client()
+client = mqtt.Client(client_id="Notebook-" + str(uuid.uuid4()), clean_session=True)
 client.connect(BROKER_IP, 1883, 60)
 
 # Interact through the shell but without interrupting the MQTT loop
 try:
     while True:
-        user_input = input("Digite: \n 'send' \t para agregar os modelos disponíveis e enviar aos dispositivos \n 'request' \t para solicitar modelos dos dispositivos \n 'listen' \t para montar um servidor que apenas escuta mensagens e salva \n 'federate' \t para abrir um servidor federado \n 'parse' \t para dar parse  nos dados e dar um output de forma mais útil \n Escreva a opção desejada: ").strip().lower()
+        user_input = input("Digite: \n 'send' \t para agregar os modelos disponíveis e enviar aos dispositivos \n 'request' \t para solicitar modelos dos dispositivos \n 'listen' \t para montar um servidor que apenas escuta mensagens e salva \n 'federate' \t para abrir um servidor federado \n 'parse' \t para dar parse  nos dados e dar um output de forma mais útil \n 'unsub' \t Força encerramento do processo federativo nos clientes Escreva a opção desejada: ").strip().lower()
         if user_input == 'send':
             do_aggregate()
             send_mqtt(filepath=WEIGHTS_FOLDER + "aggregated_weights.json")
@@ -1065,6 +1426,20 @@ try:
             do_server()
         elif user_input == 'parse':
             do_parse()
+        elif user_input == 'unsub':
+            client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_unsubscribe"}, separators=(',', ':')))
+        elif user_input == 'alive':
+            print("Enviando sinal de vida para os dispositivos...")
+            client.on_message = on_message
+            client.on_connect = on_connect
+            client.subscribe([(TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)])
+            shared_state["alive"] = []
+            client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_alive"}, separators=(',', ':')))
+            client.loop_forever()
+            sleep(2)
+            client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_alive"}, separators=(',', ':')))
+            sleep(2)
+            client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, json.dumps({"command":"federate_alive"}, separators=(',', ':')))
         else:
             print("Comando inválido. Tente novamente.")
 except KeyboardInterrupt:
