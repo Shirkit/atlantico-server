@@ -2,3 +2,5 @@ parse/*
 weights/*
 metrics/*
 metrics*/*
+__pycache__/
+.history/
