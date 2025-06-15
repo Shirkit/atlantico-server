@@ -9,6 +9,7 @@ import math
 import struct
 import numpy as np
 from parser import do_parse
+from reader import read_nn_binary_with_activation
 
 # Global configuration constants
 BROKER_IP = "127.0.0.1"
@@ -23,6 +24,7 @@ TOPIC_SEND_TO_DEVICES_RAW = "esp32/fl/model/rawpull"
 TOPIC_RECEIVE_COMMANDS_FROM_DEVICES = "esp32/fl/commands/push"
 TOPIC_SEND_COMMANDS_TO_DEVICES = "esp32/fl/commands/pull"
 TOPIC_RESUME_TO_DEVICES = "esp32/fl/model/resume"
+TOPIC_RESUME_TO_DEVICES_RAW = "esp32/fl/model/rawresume"
 
 # Directory paths
 PARSE_FOLDER = "parse/"
@@ -196,12 +198,25 @@ class MQTTFederatedServer:
                 }
                 self._send_command(json.dumps(resume_command, separators=(',', ':')))
                 
-                aggregated_weights_path = os.path.join(
+                # Try to send binary .nn file first, fallback to JSON
+                aggregated_binary_path = os.path.join(
                     self.state.federated_path,
                     str(self.state.current_round - 1),
-                    "aggregated_weights.json"
+                    "aggregated_weights.nn"
                 )
-                self._send_file(aggregated_weights_path, TOPIC_RESUME_TO_DEVICES)
+                
+                if os.path.exists(aggregated_binary_path):
+                    print(f"Enviando arquivo binário de retomada para {client_id}")
+                    self._send_binary_file(aggregated_binary_path, f"{TOPIC_RESUME_TO_DEVICES_RAW}/{client_id}")
+                else:
+                    # Fallback to JSON if binary file doesn't exist
+                    aggregated_json_path = os.path.join(
+                        self.state.federated_path,
+                        str(self.state.current_round - 1),
+                        "aggregated_weights.json"
+                    )
+                    print(f"Arquivo binário não encontrado, enviando JSON para {client_id}")
+                    self._send_file(aggregated_json_path, TOPIC_RESUME_TO_DEVICES)
                 
             except Exception as e:
                 print(f"Erro ao enviar arquivo de pesos: {e}")
@@ -282,109 +297,87 @@ class MQTTFederatedServer:
             print(f"Erro ao enviar arquivo via MQTT: {e}")
     
     def _read_binary_nn_file(self, filepath):
-        """Read neural network from binary .nn file using the correct format"""
+        """Lê arquivo binário .nn com formato ESP32"""
         try:
-            with open(filepath, 'rb') as file:
-                # Read number of layers
-                layers_data = file.read(4)
-                if len(layers_data) < 4:
-                    return None
-                numberOflayers = struct.unpack('<I', layers_data)[0]
+            print(f"📖 Lendo arquivo binário: {filepath}")
+            
+            # Use the reader with activation function support
+            network = read_nn_binary_with_activation(filepath)
+            
+            if network is not None:
+                print(f"✅ Rede neural carregada: {len(network['layers'])} layers")
                 
-                layers = []
-                
-                for i in range(numberOflayers):
-                    layer_info = {}
-                    
-                    # Read activation function for this layer
-                    actfunc_data = file.read(1)
-                    if len(actfunc_data) < 1:
-                        return None
-                    activation_function = struct.unpack('<B', actfunc_data)[0]
-                    
-                    # Read layer inputs and outputs
-                    inputs_data = file.read(4)
-                    outputs_data = file.read(4)
-                    if len(inputs_data) < 4 or len(outputs_data) < 4:
-                        return None
-                    
-                    num_inputs = struct.unpack('<I', inputs_data)[0]
-                    num_outputs = struct.unpack('<I', outputs_data)[0]
-                    
-                    layer_info['inputs'] = num_inputs
-                    layer_info['outputs'] = num_outputs
-                    layer_info['activation_function'] = activation_function
-                    
-                    # Read weights and biases for each output neuron
-                    biases = []
-                    weights = []
-                    
-                    for j in range(num_outputs):
-                        # Read bias for this output neuron
-                        bias_data = file.read(4)
-                        if len(bias_data) < 4:
-                            return None
-                        bias_value = struct.unpack('<f', bias_data)[0]
-                        biases.append(bias_value)
-                        
-                        # Read weights for this output neuron
-                        neuron_weights = []
-                        for k in range(num_inputs):
-                            weight_data = file.read(4)
-                            if len(weight_data) < 4:
-                                return None
-                            weight_value = struct.unpack('<f', weight_data)[0]
-                            neuron_weights.append(weight_value)
-                        
-                        weights.append(neuron_weights)
-                    
-                    # Store layer information
-                    layer_info['biases'] = np.array(biases, dtype=np.float32)
-                    layer_info['weights'] = np.array(weights, dtype=np.float32)  # Shape: [outputs, inputs]
-                    
-                    layers.append(layer_info)
-                
-                return {
-                    'numberOflayers': numberOflayers,
-                    'layers': layers
+                # Convert to the format expected by the aggregation code
+                network_data = {
+                    'numberOflayers': network['num_layers'],
+                    'layers': []
                 }
                 
+                for layer in network['layers']:
+                    layer_info = {
+                        'inputs': layer['inputs'],
+                        'outputs': layer['outputs'],
+                        'activation_function': layer.get('activation', 'relu'),
+                        'biases': layer['biases'],
+                        'weights': layer['weights']
+                    }
+                    network_data['layers'].append(layer_info)
+                
+                return network_data
+            else:
+                print(f"❌ Falha ao carregar rede neural de {filepath}")
+                return None
+            
         except Exception as e:
-            print(f"Erro ao ler arquivo binário {filepath}: {e}")
+            print(f"❌ Erro ao ler arquivo {filepath}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _write_binary_nn_file(self, filepath, network_data):
-        """Write neural network to binary .nn file using the correct format"""
+        """Write neural network to binary .nn file using the ESP32 format with activation functions"""
         try:
             with open(filepath, 'wb') as file:
                 # Write number of layers
                 file.write(struct.pack('<I', network_data['numberOflayers']))
                 
                 for layer in network_data['layers']:
-                    # Write activation function
-                    file.write(struct.pack('<B', layer['activation_function']))
+                    # Write activation function byte (required by ESP32 with ACTIVATION__PER_LAYER)
+                    # Map activation function names to ESP32 enum values
+                    activation_map = {
+                        'sigmoid': 0,
+                        'tanh': 1,
+                        'relu': 2,
+                        'leakyrelu': 3,
+                        'elu': 4,
+                        'selu': 5,
+                        'softmax': 6
+                    }
+                    activation_name = layer.get('activation_function', 'relu').lower()
+                    activation_byte = activation_map.get(activation_name, 2)  # Default to ReLU (2)
+                    file.write(struct.pack('<B', activation_byte))
                     
                     # Write layer inputs and outputs
                     file.write(struct.pack('<I', layer['inputs']))
                     file.write(struct.pack('<I', layer['outputs']))
                     
-                    # Write biases and weights for each output neuron
+                    # Write biases and weights for each output neuron (MULTIPLE_BIASES_PER_LAYER format)
                     for j in range(layer['outputs']):
                         # Write bias for this output neuron
                         file.write(struct.pack('<f', float(layer['biases'][j])))
                         
-                        # Write weights for this output neuron
+                        # Write weights for this output neuron (from all inputs)
                         for k in range(layer['inputs']):
                             file.write(struct.pack('<f', float(layer['weights'][j][k])))
             
-            print(f"Arquivo binário salvo: {filepath}")
+            print(f"Arquivo binário salvo: {filepath} (ESP32 format - com activation functions)")
             return True
             
         except Exception as e:
             print(f"Erro ao escrever arquivo binário {filepath}: {e}")
             return False
     
-    def _send_binary_file(self, filepath, topic=TOPIC_SEND_TO_DEVICES):
+    def _send_binary_file(self, filepath, topic=TOPIC_SEND_TO_DEVICES_RAW):
         """Send binary file content via MQTT"""
         try:
             if os.path.exists(filepath):
@@ -411,7 +404,7 @@ class MQTTFederatedServer:
         
         if nn_files:
             print(f"Usando método binário: {len(nn_files)} arquivos .nn encontrados")
-            self._aggregate_weights_binary(source_dir, nn_files, round_number)
+            return self._aggregate_weights_binary(source_dir, nn_files, round_number)
         else:
             # FALLBACK METHOD: Use JSON files if no .nn files found
             print("Nenhum arquivo .nn encontrado, tentando método JSON fallback...")
@@ -419,10 +412,10 @@ class MQTTFederatedServer:
             
             if json_files:
                 print(f"Usando método JSON fallback: {len(json_files)} arquivos JSON encontrados")
-                self._aggregate_weights_json(source_dir, json_files, round_number)
+                return self._aggregate_weights_json(source_dir, json_files, round_number)
             else:
                 print("Nenhum arquivo .nn ou .json encontrado para agregação.")
-                return
+                return None
 
     def _aggregate_weights_binary(self, source_dir, nn_files, round_number):
         """Aggregate using binary .nn files (primary method)"""
@@ -437,23 +430,23 @@ class MQTTFederatedServer:
         
         if not networks:
             print("Nenhum dado válido para agregação binária.")
-            return
+            return None
         
         # Verify all networks have the same structure
         first_network = networks[0]
         for i, network in enumerate(networks[1:], 1):
             if network['numberOflayers'] != first_network['numberOflayers']:
                 print(f"Erro: Número de camadas diferente no arquivo {nn_files[i]}")
-                return
+                return None
             
             for layer_idx in range(network['numberOflayers']):
                 first_layer = first_network['layers'][layer_idx]
                 curr_layer = network['layers'][layer_idx]
                 
-                if (first_layer['inputs'] != curr_layer['inputs'] or 
+                if (first_layer['inputs'] != curr_layer['inputs'] or
                     first_layer['outputs'] != curr_layer['outputs']):
-                    print(f"Erro: Estrutura da camada {layer_idx} diferente no arquivo {nn_files[i]}")
-                    return
+                    print(f"Erro: Estrutura de camada diferente no arquivo {nn_files[i]}")
+                    return None
         
         print(f"Agregando {len(networks)} redes neurais (método binário)...")
         
@@ -532,8 +525,11 @@ class MQTTFederatedServer:
             with open(json_output_path, 'w') as f:
                 json.dump(aggregated_json, f, indent=4, separators=(',', ':'))
             print(f"Versão JSON salva em: {json_output_path}")
+            
+            return output_path
         else:
             print("Falha ao salvar pesos agregados.")
+            return None
 
     def _aggregate_weights_json(self, source_dir, json_files, round_number):
         """Aggregate using JSON files (fallback method)"""
