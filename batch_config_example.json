@@ -1,0 +1,35 @@
+[
+  {
+    "name": "test_small_network",
+    "epochs": 1,
+    "rounds": 2,
+    "layers": [3, 20, 15, 6],
+    "activationFunctions": [1, 1, 6],
+    "learningRateWeights": 0.1,
+    "learningRateBiases": 0.02,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "test_medium_network",
+    "epochs": 1,
+    "rounds": 3,
+    "layers": [3, 40, 30, 20, 6],
+    "activationFunctions": [2, 2, 2, 6],
+    "learningRateWeights": 0.08,
+    "learningRateBiases": 0.016,
+    "seed": 123,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "test_large_network",
+    "epochs": 1,
+    "rounds": 4,
+    "layers": [3, 100, 80, 60, 40, 20, 6],
+    "activationFunctions": [1, 1, 1, 1, 1, 6],
+    "learningRateWeights": 0.05,
+    "learningRateBiases": 0.01,
+    "seed": 999,
+    "sendJsonWeights": false
+  }
+]

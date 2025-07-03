@@ -53,6 +53,9 @@ def do_parse(parse_folder, metrics_folder):
         return
 
     print("Dados parseados com sucesso.")
+    if metrics_folder and not os.path.exists(metrics_folder):
+        os.makedirs(metrics_folder)
+    
     _generate_all_plots(json_data, metrics_folder)
 
 
@@ -67,6 +70,16 @@ def _find_json_files(parse_folder):
     found_files.sort()
     return found_files
 
+def _find_nn_files(parse_folder):
+    """Find all neural network files in the parse folder."""
+    found_files = []
+    for root, dirs, files in os.walk(parse_folder):
+        for file in files:
+            if file.endswith('.nn') and file != "aggregated_weights.nn":
+                found_files.append(os.path.join(root, file))
+    
+    found_files.sort()
+    return found_files
 
 def _load_json_data(found_files):
     """Load and process JSON data from files."""
@@ -133,7 +146,8 @@ def _generate_all_plots(json_data, metrics_folder):
         plot_combined_processing_time_breakdown,
         plot_average_timing_metrics,  # Add the new function here
         plot_fixed_memory_metrics,
-        plot_round_memory_metrics
+        plot_round_memory_metrics,
+        plot_gradient_explosions  # Add gradient explosion plot
     ]
     
     for plot_func in performance_plots:
@@ -919,6 +933,85 @@ def _plot_memory_line_chart(round_metrics, rounds_list, metrics_folder):
     _save_plot(metrics_folder, "round_memory_metrics.png")
 
 
+def plot_gradient_explosions(json_data, metrics_folder):
+    """Plot gradient explosion occurrences by tracking null meanSqrdError values."""
+    explosion_data = defaultdict(int)  # round -> count of explosions
+    total_devices_per_round = defaultdict(int)  # round -> total devices
+    all_rounds = sorted(set(item.get("round", 0) for item in json_data))
+    
+    # Count explosions and total devices per round
+    for item in json_data:
+        round_num = item.get("round", 0)
+        total_devices_per_round[round_num] += 1
+        
+        # Check if meanSqrdError is null/None (gradient explosion indicator)
+        mean_sqrd_error = item.get("metrics", {}).get("meanSqrdError")
+        if mean_sqrd_error is None:
+            explosion_data[round_num] += 1
+    
+    # Prepare data for plotting
+    rounds = []
+    explosion_counts = []
+    explosion_percentages = []
+    
+    for round_num in all_rounds:
+        rounds.append(round_num)
+        count = explosion_data[round_num]
+        total = total_devices_per_round[round_num]
+        explosion_counts.append(count)
+        explosion_percentages.append((count / total * 100) if total > 0 else 0)
+    
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=LARGE_FIGURE_SIZE, sharex=True)
+    
+    # Plot 1: Absolute count of gradient explosions
+    bars1 = ax1.bar(rounds, explosion_counts, color='red', alpha=0.7, 
+                    edgecolor='darkred', linewidth=1)
+    ax1.set_title("Gradient Explosions per Round", 
+                 fontsize=TITLE_FONTSIZE, fontweight=TITLE_FONTWEIGHT, pad=TITLE_PAD)
+    ax1.set_ylabel("Number of Devices with Gradient Explosion", fontsize=AXIS_LABEL_FONTSIZE)
+    ax1.grid(True, linestyle='--', alpha=0.7, axis='y')
+    ax1.tick_params(axis='both', labelsize=TICK_LABEL_FONTSIZE)
+    
+    # Add value labels on bars
+    for bar, count in zip(bars1, explosion_counts):
+        if count > 0:
+            ax1.annotate(f'{count}', (bar.get_x() + bar.get_width()/2, bar.get_height()),
+                        ha='center', va='bottom', fontsize=ANNOTATION_FONTSIZE, 
+                        fontweight='bold', color='darkred')
+    
+    # Plot 2: Percentage of devices with gradient explosions
+    bars2 = ax2.bar(rounds, explosion_percentages, color='orange', alpha=0.7,
+                    edgecolor='darkorange', linewidth=1)
+    ax2.set_title("Percentage of Devices with Gradient Explosions per Round", 
+                 fontsize=TITLE_FONTSIZE, fontweight=TITLE_FONTWEIGHT, pad=TITLE_PAD)
+    ax2.set_xlabel("Round", fontsize=AXIS_LABEL_FONTSIZE)
+    ax2.set_ylabel("Percentage of Devices (%)", fontsize=AXIS_LABEL_FONTSIZE)
+    ax2.grid(True, linestyle='--', alpha=0.7, axis='y')
+    ax2.tick_params(axis='both', labelsize=TICK_LABEL_FONTSIZE)
+    ax2.set_ylim(0, 100)
+    
+    # Add percentage labels on bars
+    for bar, percentage in zip(bars2, explosion_percentages):
+        if percentage > 0:
+            ax2.annotate(f'{percentage:.1f}%', (bar.get_x() + bar.get_width()/2, bar.get_height()),
+                        ha='center', va='bottom', fontsize=ANNOTATION_FONTSIZE, 
+                        fontweight='bold', color='darkorange')
+    
+    # Set x-axis ticks to show all rounds
+    plt.xticks(all_rounds, fontsize=TICK_LABEL_FONTSIZE)
+    
+    # Add summary statistics as text
+    total_explosions = sum(explosion_counts)
+    total_measurements = sum(total_devices_per_round.values())
+    overall_percentage = (total_explosions / total_measurements * 100) if total_measurements > 0 else 0
+    
+    summary_text = f"Summary: {total_explosions} explosions out of {total_measurements} measurements ({overall_percentage:.1f}%)"
+    fig.suptitle(summary_text, fontsize=ANNOTATION_FONTSIZE, y=0.02)
+    
+    _save_plot(metrics_folder, "gradient_explosions.png")
+
+
 def _has_timing_data(item):
     """Check if item has valid timing data."""
     return ("timings" in item and 
@@ -929,6 +1022,391 @@ def _has_timing_data(item):
 def _save_plot(metrics_folder, filename):
     """Save plot with consistent formatting and close figure."""
     plt.tight_layout()
-    plt.savefig(metrics_folder + filename, dpi=STANDARD_DPI, bbox_inches='tight')
+    plt.savefig(os.path.join(metrics_folder, filename), dpi=STANDARD_DPI, bbox_inches='tight')
     print(f"Plot saved as {filename}")
     plt.close()
+
+
+def plot_batch_comparison(batch_folder, metrics_folder=None):
+    """
+    Compare average metrics across multiple batch tests.
+    
+    Args:
+        batch_folder: Path to the batch folder containing multiple test subfolders
+        metrics_folder: Path where comparison plots will be saved (optional, defaults to batch_folder/metrics/)
+    """
+    print(f"Starting batch comparison for folder: {batch_folder}")
+    
+    # Set default metrics folder if not provided
+    if metrics_folder is None:
+        metrics_folder = os.path.join(batch_folder, "metrics")
+    
+    # Create metrics folder if it doesn't exist
+    if not os.path.exists(metrics_folder):
+        os.makedirs(metrics_folder)
+        print(f"Created metrics folder: {metrics_folder}")
+    
+    # Find all test subfolders in the batch folder
+    test_folders = []
+    if os.path.exists(batch_folder):
+        for item in os.listdir(batch_folder):
+            item_path = os.path.join(batch_folder, item)
+            if os.path.isdir(item_path) and not item.startswith('.') and item != 'metrics':
+                # Check if this is a test folder (has done.json)
+                done_json_path = os.path.join(item_path, "done.json")
+                if os.path.exists(done_json_path):
+                    # This is a valid test folder, use it directly
+                    test_folders.append((item, item_path))
+    
+    if not test_folders:
+        print("No test folders with parse subfolders found in batch folder.")
+        return
+    
+    print(f"Found {len(test_folders)} test folders")
+    
+    # Load data from all tests
+    all_test_data = {}
+    metrics_to_plot = ["accuracy", "precision", "f1Score", "recall", "meanSqrdError"]
+    
+    for test_name, parse_path in test_folders:
+        print(f"Processing test: {test_name}")
+        found_files = _find_json_files(parse_path)
+        if found_files:
+            json_data = _load_json_data(found_files)
+            if json_data:
+                # Calculate average metrics for this test
+                test_averages = _calculate_test_averages(json_data, metrics_to_plot)
+                all_test_data[test_name] = test_averages
+    
+    if not all_test_data:
+        print("No valid data found in any test folder.")
+        return
+    
+    # Create comparison plots
+    _plot_batch_metric_comparisons(all_test_data, metrics_folder, metrics_to_plot)
+    _plot_batch_combined_comparison(all_test_data, metrics_folder, metrics_to_plot)
+    _plot_batch_gradient_explosions(test_folders, metrics_folder)
+
+
+def _calculate_test_averages(json_data, metrics_to_plot):
+    """Calculate average metrics across all clients for each round in a test."""
+    round_data = defaultdict(lambda: defaultdict(list))
+    all_rounds = sorted(set(item.get("round", 0) for item in json_data))
+    
+    # Extract metrics by round
+    for item in json_data:
+        round_num = item.get("round", 0)
+        for metric in metrics_to_plot:
+            if metric in item["metrics"]:
+                try:
+                    value = float(item["metrics"][metric])
+                    round_data[round_num][metric].append(value)
+                except (ValueError, TypeError):
+                    continue
+    
+    # Calculate averages for each round
+    test_averages = {}
+    for metric in metrics_to_plot:
+        test_averages[metric] = []
+        for round_num in all_rounds:
+            values = round_data[round_num][metric]
+            if values:
+                avg = sum(values) / len(values)
+                test_averages[metric].append((round_num, avg))
+    
+    return test_averages
+
+
+def _plot_batch_metric_comparisons(all_test_data, metrics_folder, metrics_to_plot):
+    """Create individual comparison plots for each metric across all tests."""
+    for metric in metrics_to_plot:
+        plt.figure(figsize=LARGE_FIGURE_SIZE)
+        
+        # Define colors for different tests
+        colors = plt.cm.tab10(np.linspace(0, 1, len(all_test_data)))
+        
+        for i, (test_name, test_data) in enumerate(all_test_data.items()):
+            if metric in test_data and test_data[metric]:
+                points = sorted(test_data[metric], key=lambda x: x[0])
+                rounds, values = zip(*points) if points else ([], [])
+                
+                plt.plot(rounds, values, 'o-', 
+                        linewidth=STANDARD_LINEWIDTH, 
+                        color=colors[i],
+                        label=test_name, 
+                        markersize=STANDARD_MARKERSIZE)
+        
+        plt.title(f"Batch Comparison - Average {metric} Across All Tests", 
+                 fontsize=TITLE_FONTSIZE, fontweight=TITLE_FONTWEIGHT, pad=TITLE_PAD)
+        plt.xlabel("Round", fontsize=AXIS_LABEL_FONTSIZE)
+        plt.ylabel(f"Average {metric}", fontsize=AXIS_LABEL_FONTSIZE)
+        plt.legend(fontsize=LEGEND_FONTSIZE, bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.xticks(fontsize=TICK_LABEL_FONTSIZE)
+        plt.yticks(fontsize=TICK_LABEL_FONTSIZE)
+        
+        _save_plot(metrics_folder, f"batch_comparison_{metric}.png")
+
+
+def _plot_batch_combined_comparison(all_test_data, metrics_folder, metrics_to_plot):
+    """Create a combined plot showing all metrics for all tests."""
+    # Create subplots for each metric
+    fig, axes = plt.subplots(2, 3, figsize=(20, 12))
+    fig.suptitle("Batch Comparison - All Metrics Across All Tests", 
+                fontsize=TITLE_FONTSIZE + 2, fontweight=TITLE_FONTWEIGHT)
+    
+    # Flatten axes for easier indexing
+    axes_flat = axes.flatten()
+    
+    # Define colors for different tests
+    colors = plt.cm.tab10(np.linspace(0, 1, len(all_test_data)))
+    legend_handles = []
+    legend_labels = []
+    
+    for metric_idx, metric in enumerate(metrics_to_plot):
+        ax = axes_flat[metric_idx]
+        
+        for test_idx, (test_name, test_data) in enumerate(all_test_data.items()):
+            if metric in test_data and test_data[metric]:
+                points = sorted(test_data[metric], key=lambda x: x[0])
+                rounds, values = zip(*points) if points else ([], [])
+                
+                line = ax.plot(rounds, values, 'o-', 
+                              linewidth=STANDARD_LINEWIDTH, 
+                              color=colors[test_idx],
+                              label=test_name, 
+                              markersize=STANDARD_MARKERSIZE)
+                
+                # Collect legend info from the first metric only to avoid duplicates
+                if metric_idx == 0 and line:
+                    legend_handles.append(line[0])
+                    legend_labels.append(test_name)
+        
+        ax.set_title(f"Average {metric}", fontsize=AXIS_LABEL_FONTSIZE, fontweight='bold')
+        ax.set_xlabel("Round", fontsize=TICK_LABEL_FONTSIZE)
+        ax.set_ylabel(f"Average {metric}", fontsize=TICK_LABEL_FONTSIZE)
+        ax.grid(True, linestyle='--', alpha=0.7)
+        ax.tick_params(axis='both', labelsize=TICK_LABEL_FONTSIZE - 1)
+    
+    # Hide the last subplot if we have an odd number of metrics
+    if len(metrics_to_plot) < len(axes_flat):
+        # Clear the last subplot but keep it visible for the legend
+        axes_flat[-1].clear()
+        axes_flat[-1].set_xticks([])
+        axes_flat[-1].set_yticks([])
+        axes_flat[-1].spines['top'].set_visible(False)
+        axes_flat[-1].spines['right'].set_visible(False)
+        axes_flat[-1].spines['bottom'].set_visible(False)
+        axes_flat[-1].spines['left'].set_visible(False)
+        
+        # Place legend in the empty bottom-right subplot area
+        if legend_handles and legend_labels:
+            axes_flat[-1].legend(legend_handles, legend_labels, fontsize=LEGEND_FONTSIZE - 1, 
+                               loc='center', frameon=True, fancybox=True, shadow=True)
+    else:
+        # If all subplots are used, place legend in bottom-right corner of the figure
+        if legend_handles and legend_labels:
+            fig.legend(legend_handles, legend_labels, fontsize=LEGEND_FONTSIZE - 1, 
+                      loc='lower right', bbox_to_anchor=(0.98, 0.02))
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(metrics_folder, "batch_comparison_combined.png"), 
+                dpi=STANDARD_DPI, bbox_inches='tight')
+    print("Plot saved as batch_comparison_combined.png")
+    plt.close()
+
+
+def _plot_batch_gradient_explosions(test_folders, metrics_folder):
+    """Create a line plot showing gradient explosions across all batch tests."""
+    plt.figure(figsize=LARGE_FIGURE_SIZE)
+    
+    # Define colors for different tests
+    colors = plt.cm.tab10(np.linspace(0, 1, len(test_folders)))
+    
+    # Track all rounds across all tests to get consistent x-axis
+    all_rounds = set()
+    explosion_data = {}
+    
+    # Process each test to count gradient explosions per round
+    for test_name, test_path in test_folders:
+        print(f"Processing gradient explosions for test: {test_name}")
+        found_files = _find_json_files(test_path)
+        if found_files:
+            json_data = _load_json_data(found_files)
+            if json_data:
+                round_explosions = defaultdict(int)
+                
+                # Count explosions per round
+                for item in json_data:
+                    round_num = item.get("round", 0)
+                    all_rounds.add(round_num)
+                    
+                    # Check if meanSqrdError is null (gradient explosion)
+                    if item.get("metrics", {}).get("meanSqrdError") is None:
+                        round_explosions[round_num] += 1
+                
+                explosion_data[test_name] = round_explosions
+    
+    if not explosion_data:
+        print("No gradient explosion data found for batch comparison")
+        return
+    
+    all_rounds = sorted(all_rounds)
+    
+    # Calculate total explosions per test for summary
+    total_explosions = {}
+    for test_name, round_explosions in explosion_data.items():
+        total_explosions[test_name] = sum(round_explosions.values())
+    
+    # Plot lines for each test
+    for i, (test_name, round_explosions) in enumerate(explosion_data.items()):
+        # Create data points for all rounds (0 if no explosions)
+        explosion_counts = [round_explosions.get(round_num, 0) for round_num in all_rounds]
+        total = total_explosions[test_name]
+        
+        # Add total to label
+        label_with_total = f"{test_name} (Total: {total})"
+        
+        plt.plot(all_rounds, explosion_counts, 'o-', 
+                linewidth=STANDARD_LINEWIDTH, 
+                color=colors[i],
+                label=label_with_total, 
+                markersize=STANDARD_MARKERSIZE)
+    
+    plt.title("Batch Comparison - Gradient Explosions per Round", 
+             fontsize=TITLE_FONTSIZE, fontweight=TITLE_FONTWEIGHT, pad=TITLE_PAD)
+    plt.xlabel("Round", fontsize=AXIS_LABEL_FONTSIZE)
+    plt.ylabel("Number of Devices with Gradient Explosion", fontsize=AXIS_LABEL_FONTSIZE)
+    plt.legend(fontsize=LEGEND_FONTSIZE - 2, bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.xticks(all_rounds, fontsize=TICK_LABEL_FONTSIZE)
+    plt.yticks(fontsize=TICK_LABEL_FONTSIZE)
+    
+    # Set y-axis to start at 0 and use integer ticks
+    plt.ylim(bottom=0)
+    max_explosions = max([max(explosions.values()) if explosions else 0 
+                         for explosions in explosion_data.values()])
+    if max_explosions > 0:
+        plt.yticks(range(0, max_explosions + 1))
+    
+    # Add summary text box
+    summary_text = "Summary - Total Gradient Explosions:\n"
+    sorted_totals = sorted(total_explosions.items(), key=lambda x: x[1], reverse=True)
+    for test_name, total in sorted_totals:
+        summary_text += f"• {test_name}: {total}\n"
+    
+    # Add text box with summary outside plot area (bottom right of figure)
+    plt.figtext(0.98, 0.02, summary_text, 
+                fontsize=ANNOTATION_FONTSIZE, verticalalignment='bottom', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+    
+    _save_plot(metrics_folder, "batch_comparison_gradient_explosions.png")
+    
+    # Also create a heatmap version
+    _create_gradient_explosions_heatmap(explosion_data, all_rounds, metrics_folder)
+
+
+def _create_gradient_explosions_heatmap(explosion_data, all_rounds, metrics_folder):
+    """Create a heatmap showing gradient explosions per test and round."""
+    if not explosion_data:
+        print("No gradient explosion data found for heatmap generation")
+        return
+    
+    # Prepare data for heatmap
+    test_names = sorted(explosion_data.keys())
+    
+    # Calculate totals for each test
+    test_totals = {}
+    for test_name in test_names:
+        test_totals[test_name] = sum(explosion_data[test_name].values())
+    
+    # Sort test names by total explosions (descending)
+    test_names = sorted(test_names, key=lambda x: test_totals[x], reverse=True)
+    
+    # Create matrix for heatmap
+    heatmap_data = []
+    test_labels_with_totals = []
+    for test_name in test_names:
+        row = []
+        for round_num in all_rounds:
+            explosions = explosion_data[test_name].get(round_num, 0)
+            row.append(explosions)
+        heatmap_data.append(row)
+        # Add total to the test name label
+        test_labels_with_totals.append(f"{test_name} (Total: {test_totals[test_name]})")
+    
+    # Create heatmap
+    plt.figure(figsize=(max(12, len(all_rounds) * 0.8), max(8, len(test_names) * 0.5)))
+    
+    # Convert to numpy array for easier handling
+    heatmap_array = np.array(heatmap_data)
+    
+    # Create heatmap with colorbar
+    im = plt.imshow(heatmap_array, cmap='Reds', aspect='auto', interpolation='nearest')
+    
+    # Set ticks and labels
+    plt.xticks(range(len(all_rounds)), all_rounds, fontsize=TICK_LABEL_FONTSIZE)
+    plt.yticks(range(len(test_names)), test_labels_with_totals, fontsize=TICK_LABEL_FONTSIZE - 1)
+    
+    # Add colorbar
+    cbar = plt.colorbar(im)
+    cbar.set_label('Number of Gradient Explosions', rotation=270, labelpad=20, 
+                   fontsize=AXIS_LABEL_FONTSIZE)
+    
+    # Add text annotations on heatmap
+    for i in range(len(test_names)):
+        for j in range(len(all_rounds)):
+            value = heatmap_array[i, j]
+            if value > 0:  # Only show non-zero values
+                text_color = 'white' if value > heatmap_array.max() * 0.6 else 'black'
+                plt.text(j, i, str(int(value)), ha='center', va='center', 
+                        color=text_color, fontweight='bold', fontsize=10)
+    
+    plt.xlabel('Round', fontsize=AXIS_LABEL_FONTSIZE)
+    plt.ylabel('Test', fontsize=AXIS_LABEL_FONTSIZE)
+    plt.title('Gradient Explosions Heatmap: Tests vs Rounds', 
+             fontsize=TITLE_FONTSIZE, fontweight=TITLE_FONTWEIGHT, pad=TITLE_PAD)
+    plt.tight_layout()
+    
+    _save_plot(metrics_folder, "batch_comparison_gradient_explosions_heatmap.png")
+
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage:")
+        print("  For regular parsing: python parser.py <parse_folder> <metrics_folder>")
+        print("  For batch comparison: python parser.py --batch <batch_folder> [metrics_folder]")
+        sys.exit(1)
+    
+    if sys.argv[1] == "--batch":
+        if len(sys.argv) < 3 or len(sys.argv) > 4:
+            print("Usage for batch comparison: python parser.py --batch <batch_folder> [metrics_folder]")
+            print("  metrics_folder is optional - defaults to <batch_folder>/metrics/")
+            sys.exit(1)
+        
+        batch_folder = sys.argv[2]
+        metrics_folder = sys.argv[3] if len(sys.argv) == 4 else None
+        
+        plot_batch_comparison(batch_folder, metrics_folder)
+        print("Batch comparison completed!")
+    
+    elif sys.argv[1] in ["-h", "--help"]:
+        print("Usage:")
+        print("  For regular parsing: python parser.py <parse_folder> <metrics_folder>")
+        print("  For batch comparison: python parser.py --batch <batch_folder> [metrics_folder]")
+        print("    metrics_folder is optional - defaults to <batch_folder>/metrics/")
+        sys.exit(0)
+    
+    else:
+        # Regular parsing mode
+        if len(sys.argv) != 3:
+            print("Usage for regular parsing: python parser.py <parse_folder> <metrics_folder>")
+            sys.exit(1)
+            
+        parse_folder = sys.argv[1]
+        metrics_folder = sys.argv[2]
+        
+        do_parse(parse_folder, metrics_folder)
+        print("Parsing completed!")

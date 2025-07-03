@@ -8,7 +8,9 @@ import traceback
 import math
 import struct
 import numpy as np
-from parser import do_parse
+import argparse
+import sys
+from parser import do_parse, plot_batch_comparison
 from reader import read_nn_binary_with_activation
 
 # Global configuration constants
@@ -28,22 +30,28 @@ TOPIC_RESUME_TO_DEVICES_RAW = "esp32/fl/model/rawresume"
 
 # Directory paths
 PARSE_FOLDER = "parse/"
+PARSE_ALL_FOLDER = "parse_all/"
 WEIGHTS_FOLDER = "weights/"
 METRICS_FOLDER = "metrics/"
 
 # Federated learning configuration
-DEFAULT_LAYERS = [3, 9, 6]
-DEFAULT_ACTIVATION_FUNCTIONS = [1, 6]
+DEFAULT_LAYERS = [3, 40, 30, 20, 10, 6]
+DEFAULT_ACTIVATION_FUNCTIONS = [1, 1, 1, 1, 6]
+# DEFAULT_LAYERS = [3, 200, 110, 60, 33, 20, 12, 6]
+# DEFAULT_ACTIVATION_FUNCTIONS = [1, 1, 1, 1, 1, 1, 6]
+# DEFAULT_LAYERS = [3, 100, 80, 60, 40, 20, 10, 6]
+# DEFAULT_ACTIVATION_FUNCTIONS = [1, 1, 1, 1, 1, 1, 6]
 DEFAULT_EPOCHS = 1
-DEFAULT_LEARNING_RATE_WEIGHTS = 0.3333 / 12.0
-DEFAULT_LEARNING_RATE_BIASES = 0.0666 / 12.0
+DEFAULT_LEARNING_RATE_WEIGHTS = 0.3333 / 4.0
+DEFAULT_LEARNING_RATE_BIASES = 0.0666 / 4.0
 DEFAULT_RANDOM_SEED = 10
+DEFAULT_SEND_JSON_WEIGHTS = False
 
 # Timing constants
 CONNECTION_WAIT_TIME = 10
 COMMAND_RETRY_INTERVAL = 3
 COMMAND_RETRIES = 3
-STATUS_UPDATE_INTERVAL = 20
+STATUS_UPDATE_INTERVAL = 30
 
 
 class FederatedServerState:
@@ -57,6 +65,7 @@ class FederatedServerState:
         self.connected_clients = []
         self.waiting_for_clients = []
         self.alive_clients = []
+        self.debug = False
     
     def reset(self):
         """Reset server state"""
@@ -76,6 +85,7 @@ class MQTTFederatedServer:
         self.client = mqtt.Client(client_id=f"Notebook-{uuid.uuid4()}", clean_session=True)
         self.state = FederatedServerState()
         self._setup_mqtt_client()
+        self.debug = False
         
     def _setup_mqtt_client(self):
         """Configure MQTT client"""
@@ -93,12 +103,16 @@ class MQTTFederatedServer:
         try:
             topic = message.topic
             topic_parts = topic.split('/')
-            print(f"Mensagem recebida no tópico: {topic}")
+            if self.debug:
+                print(f"Mensagem recebida no tópico: {topic}")
             
             if topic_parts[2] == "model" and topic_parts[3] == "rawpush":
-                print('Recebendo arquivo de rede neural...')
+                if self.debug:
+                    print('Recebendo arquivo de rede neural...')
                 self._handle_raw_push_message(topic_parts, message.payload)
             elif topic_parts[2] == "model" and topic_parts[3] == "push":
+                if self.debug:
+                    print('Recebendo mensagem de modelo...')
                 self._handle_model_message(message.payload.decode("utf-8"))
             elif topic_parts[2] == "commands":
                 self._handle_command_message(message.payload.decode("utf-8"))
@@ -133,7 +147,8 @@ class MQTTFederatedServer:
             f.write(payload)
         
         # Remove client from waiting list if applicable
-        if client_name in self.state.waiting_for_clients:
+        json_filepath = filepath.replace(".nn", ".json")
+        if os.path.exists(json_filepath) and client_name in self.state.waiting_for_clients:
             self.state.waiting_for_clients.remove(client_name)
             
     def _handle_model_message(self, payload):
@@ -224,7 +239,9 @@ class MQTTFederatedServer:
     def _handle_federated_alive_command(self, client_id):
         """Handle alive messages in federated mode"""
         if client_id in self.state.connected_clients:
-            print(f"Cliente {client_id} está ativo.")
+            if client_id not in self.state.alive_clients:
+                self.state.alive_clients.append(client_id)
+                self.state.alive_clients.sort()
     
     def _handle_alive_command(self, client_id):
         """Handle alive messages in normal mode"""
@@ -265,7 +282,6 @@ class MQTTFederatedServer:
             try:
                 with open(filepath, 'x') as json_file:
                     json.dump(output_data, json_file, indent=4, separators=(',', ':'))
-                print(f"Arquivo JSON salvo como: {filepath}")
             except FileExistsError:
                 print(f"Arquivo JSON já existe: {filepath} Ignorando...")
                 # File already exists, probably received twice - ignore
@@ -278,7 +294,8 @@ class MQTTFederatedServer:
     def _send_command(self, command_data, topic=TOPIC_SEND_COMMANDS_TO_DEVICES):
         """Send command via MQTT"""
         try:
-            print("Enviando comando via MQTT...")
+            if self.debug:
+                print("Enviando comando via MQTT...")
             self.client.publish(topic, command_data)
         except Exception as e:
             print(f"Erro ao enviar comando via MQTT: {e}")
@@ -289,7 +306,6 @@ class MQTTFederatedServer:
             if os.path.exists(filepath):
                 with open(filepath, "r") as file:
                     content = file.read().strip()
-                    print(f"Enviando arquivo {filepath} via MQTT...")
                     self.client.publish(topic, content)
             else:
                 print(f"Arquivo {filepath} não encontrado.")
@@ -299,14 +315,10 @@ class MQTTFederatedServer:
     def _read_binary_nn_file(self, filepath):
         """Lê arquivo binário .nn com formato ESP32"""
         try:
-            print(f"📖 Lendo arquivo binário: {filepath}")
-            
             # Use the reader with activation function support
             network = read_nn_binary_with_activation(filepath)
             
             if network is not None:
-                print(f"✅ Rede neural carregada: {len(network['layers'])} layers")
-                
                 # Convert to the format expected by the aggregation code
                 network_data = {
                     'numberOflayers': network['num_layers'],
@@ -370,7 +382,6 @@ class MQTTFederatedServer:
                         for k in range(layer['inputs']):
                             file.write(struct.pack('<f', float(layer['weights'][j][k])))
             
-            print(f"Arquivo binário salvo: {filepath} (ESP32 format - com activation functions)")
             return True
             
         except Exception as e:
@@ -403,7 +414,6 @@ class MQTTFederatedServer:
         nn_files = [f for f in files if f.endswith('.nn') and f != "aggregated_weights.nn"]
         
         if nn_files:
-            print(f"Usando método binário: {len(nn_files)} arquivos .nn encontrados")
             return self._aggregate_weights_binary(source_dir, nn_files, round_number)
         else:
             # FALLBACK METHOD: Use JSON files if no .nn files found
@@ -426,8 +436,7 @@ class MQTTFederatedServer:
             network_data = self._read_binary_nn_file(filepath)
             if network_data is not None:
                 networks.append(network_data)
-                print(f"Lido arquivo {file}: {network_data['numberOflayers']} camadas")
-        
+                 
         if not networks:
             print("Nenhum dado válido para agregação binária.")
             return None
@@ -447,8 +456,6 @@ class MQTTFederatedServer:
                     first_layer['outputs'] != curr_layer['outputs']):
                     print(f"Erro: Estrutura de camada diferente no arquivo {nn_files[i]}")
                     return None
-        
-        print(f"Agregando {len(networks)} redes neurais (método binário)...")
         
         # Create aggregated network structure
         aggregated_network = {
@@ -479,7 +486,8 @@ class MQTTFederatedServer:
             aggregated_layer['weights'] /= len(networks)
             
             aggregated_network['layers'].append(aggregated_layer)
-            print(f"Camada {layer_idx}: {aggregated_layer['inputs']} -> {aggregated_layer['outputs']}")
+            if self.debug:
+                print(f"Camada {layer_idx}: {aggregated_layer['inputs']} -> {aggregated_layer['outputs']}")
         
         # Save aggregated network as binary file
         if self.state.is_federated:
@@ -495,7 +503,6 @@ class MQTTFederatedServer:
         success = self._write_binary_nn_file(output_path, aggregated_network)
         
         if success:
-            print(f"Pesos agregados salvos em: {output_path}")
             print(f"Agregados {len(networks)} modelos válidos.")
             
             # Also save as JSON for compatibility/debugging with parser.py
@@ -524,7 +531,6 @@ class MQTTFederatedServer:
                 
             with open(json_output_path, 'w') as f:
                 json.dump(aggregated_json, f, indent=4, separators=(',', ':'))
-            print(f"Versão JSON salva em: {json_output_path}")
             
             return output_path
         else:
@@ -606,7 +612,7 @@ class MQTTFederatedServer:
         print(f"Pesos agregados salvos em: {output_path}")
         print(f"Agregados {valid_count} modelos válidos de {len(json_data)} total (método JSON).")
     
-    def start_federated_learning(self):
+    def start_federated_learning(self, max_rounds=None, expected_clients=None):
         """Start federated learning process"""
         print('\33]0;Servidor Federado\a', end='', flush=True)
         
@@ -619,78 +625,60 @@ class MQTTFederatedServer:
         self.client.subscribe(topics)
         self.client.loop_start()
         
-        # Initialize federated learning state
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.state.federated_path = os.path.join(WEIGHTS_FOLDER, timestamp)
-        self.state.current_round = 0
-        self.state.is_federated = True
-        self.state.connected_clients.clear()
-        
-        # Get configuration from user
+        # Get configuration from user or parameters
         try:
-            self.state.max_rounds = int(input("\nDigite o número de rodadas para o processo federativo: "))
-            expected_clients = int(input("Digite o número de clientes esperados: "))
+            if max_rounds is not None:
+                max_rounds = max_rounds
+            else:
+                max_rounds = int(input("\nDigite o número de rodadas para o processo federativo: "))
+            
+            if expected_clients is not None:
+                expected_clients = expected_clients
+            else:
+                expected_clients = int(input("Digite o número de clientes esperados: "))
         except ValueError:
             print("Entrada inválida. Encerrando...")
             return
         
-        # Create directories
-        os.makedirs(self.state.federated_path, exist_ok=True)
-        os.makedirs(os.path.join(self.state.federated_path, str(self.state.current_round)), exist_ok=True)
-        
-        # Wait for client connections
-        print(f"Aguardando {CONNECTION_WAIT_TIME} segundos para conexão dos dispositivos...")
-        
-        for i in range(COMMAND_RETRIES):
-            join_command = {"command": "federate_join"}
-            self._send_command(json.dumps(join_command, separators=(',', ':')))
-            sleep(COMMAND_RETRY_INTERVAL)
-        
-        if len(self.state.connected_clients) < 1:
-            print("Nenhum cliente conectado. Encerrando...")
-            self._cleanup_federated_learning()
-            return
-        
-        if len(self.state.connected_clients) < expected_clients:
-            print("Número insuficiente de clientes conectados. Encerrando...")
-            self._send_unsubscribe_command()
-            self._cleanup_federated_learning()
-            return
-        
-        print(f"Federated learning iniciado com {len(self.state.connected_clients)} clientes.")
-        
-        # Create start command with neural network configuration
-        start_command = {
-            "command": "federate_start",
-            "config": {
-                "layers": DEFAULT_LAYERS,
-                "actvFunctions": DEFAULT_ACTIVATION_FUNCTIONS,
-                "epochs": DEFAULT_EPOCHS,
-                "learningRateOfWeights": DEFAULT_LEARNING_RATE_WEIGHTS,
-                "learningRateOfBiases": DEFAULT_LEARNING_RATE_BIASES,
-                "randomSeed": DEFAULT_RANDOM_SEED
-            }
+        # Create default test configuration
+        test_config = {
+            "name": "federated_learning",
+            "epochs": DEFAULT_EPOCHS,
+            "rounds": max_rounds,
+            "layers": DEFAULT_LAYERS,
+            "activationFunctions": DEFAULT_ACTIVATION_FUNCTIONS,
+            "learningRateWeights": DEFAULT_LEARNING_RATE_WEIGHTS,
+            "learningRateBiases": DEFAULT_LEARNING_RATE_BIASES,
+            "seed": DEFAULT_RANDOM_SEED,
+            "sendJsonWeights": DEFAULT_SEND_JSON_WEIGHTS
         }
         
-        # Initialize waiting list
-        self.state.waiting_for_clients = self.state.connected_clients.copy()
+        print(f"Configuração do processo federativo: {test_config}")
         
-        print(f"Configuração do processo federativo: {start_command['config']}")
-        self._send_command(json.dumps(start_command, separators=(',', ':')))
+        # Run single federated learning session using shared code
+        success = self._run_single_batch_test(test_config, 1, expected_clients, None)
         
-        # Save configuration
-        self._save_federated_config(start_command)
-        
-        # Main federated learning loop
-        self._run_federated_learning_loop()
+        if success:
+            # Use the shared finalization
+            self._finalize_single_batch_test()
+            print("✅ Federated learning concluído com sucesso.")
+        else:
+            print("❌ Federated learning falhou.")
         
         # Cleanup
-        self._finalize_federated_learning()
+        self._cleanup_federated_learning()
     
-    def _save_federated_config(self, start_command):
+    def _save_federated_config(self, start_command, test_config=None, test_number=None):
         """Save federated learning configuration"""
         config = start_command["config"].copy()
         config["devices"] = sorted(self.state.connected_clients)
+        
+        # Add batch-specific info if available
+        if test_config and test_number:
+            config.update({
+                "batch_test_number": test_number,
+                "batch_test_name": test_config.get('name', f'batch_test_{test_number}'),
+            })
         
         # Calculate neural network parameters
         layers = config["layers"]
@@ -700,81 +688,12 @@ class MQTTFederatedServer:
             "neurons": total_neurons,
             "device_count": len(self.state.connected_clients),
             "bits": "32",
-            "run": "X"
+            "run": "X",
         })
         
         config_path = os.path.join(self.state.federated_path, "config.json")
         with open(config_path, 'w') as f:
-            json.dump(start_command, f, indent=4, separators=(',', ':'))
-    
-    def _run_federated_learning_loop(self):
-        """Main federated learning training loop"""
-        status_timer = 0
-        
-        while True:
-            sleep(1)
-            status_timer += 1
-            
-            # Check if all clients have submitted their models
-            if len(self.state.waiting_for_clients) == 0:
-                if self.state.current_round + 1 >= self.state.max_rounds:
-                    print("Número máximo de rodadas atingido.")
-                    self.aggregate_weights(self.state.current_round)
-                    break
-                
-                print("Todos os arquivos recebidos para esta rodada.")
-                sleep(1)
-                
-                # Aggregate weights and send to clients
-                self.aggregate_weights(self.state.current_round)
-                
-                # Send binary aggregated weights to devices
-                aggregated_binary_path = os.path.join(
-                    self.state.federated_path,
-                    str(self.state.current_round),
-                    "aggregated_weights.nn"
-                )
-                self._send_binary_file(aggregated_binary_path)
-                sleep(1)
-                
-                # Prepare for next round
-                self.state.current_round += 1
-                next_round_dir = os.path.join(self.state.federated_path, str(self.state.current_round))
-                os.makedirs(next_round_dir, exist_ok=True)
-                
-                self.state.waiting_for_clients = self.state.connected_clients.copy()
-                print(f"Pesos enviados. Iniciando próximo round: {self.state.current_round}")
-                status_timer = 0
-                
-            elif status_timer >= STATUS_UPDATE_INTERVAL:
-                received_count = len(self.state.connected_clients) - len(self.state.waiting_for_clients)
-                total_count = len(self.state.connected_clients)
-                
-                print(f"Arquivos recebidos: {received_count} de {total_count}. "
-                      f"Aguardando: {self.state.waiting_for_clients}")
-                status_timer = 0
-    
-    def _finalize_federated_learning(self):
-        """Finalize federated learning process"""
-        # Create final round directory
-        self.state.current_round += 1
-        final_round_dir = os.path.join(self.state.federated_path, str(self.state.current_round))
-        os.makedirs(final_round_dir, exist_ok=True)
-        
-        # Send end command
-        end_command = {"command": "federate_end"}
-        self._send_command(json.dumps(end_command, separators=(',', ':')))
-        sleep(5)
-        
-        # Send unsubscribe command
-        self._send_unsubscribe_command()
-        
-        # Mark completion
-        done_path = os.path.join(self.state.federated_path, "done.json")
-        with open(done_path, 'w') as f:
-            json.dump({}, f, indent=4, separators=(',', ':'))
-        
-        self._cleanup_federated_learning()
+            json.dump(config, f, indent=4, separators=(',', ':'))
     
     def _send_unsubscribe_command(self):
         """Send unsubscribe command to all clients"""
@@ -791,6 +710,7 @@ class MQTTFederatedServer:
         
         topics = [
             (TOPIC_RECEIVE_FROM_DEVICES, 0),
+            (TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
             (TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
         ]
         self.client.subscribe(topics)
@@ -813,12 +733,14 @@ class MQTTFederatedServer:
         
         print("Enviando sinal de vida para os dispositivos...")
         alive_command = {"command": "federate_alive"}
-        
+
         self._send_command(json.dumps(alive_command, separators=(',', ':')))
-        # for _ in range(COMMAND_RETRIES):
-        #     sleep(2)
-        
+
         self.client.loop_forever()
+
+        # while(True):
+        #     self._send_command(json.dumps(alive_command, separators=(',', ':')))
+        #     sleep(3)        
     
     def send_aggregated_weights(self):
         """Aggregate weights and send to devices"""
@@ -827,14 +749,416 @@ class MQTTFederatedServer:
         aggregated_binary_path = os.path.join(WEIGHTS_FOLDER, "aggregated_weights.nn")
         self._send_binary_file(aggregated_binary_path)
     
-    def parse_training_data(self):
+    def parse_training_data(self, folder=None):
         """Parse training data and generate visualizations"""
-        do_parse(PARSE_FOLDER, METRICS_FOLDER)
+        parse_folder = folder if folder else PARSE_FOLDER
+        metrics_folder = os.path.join(parse_folder, 'metrics/') if folder else METRICS_FOLDER
+        do_parse(parse_folder, metrics_folder)
+
+    def parse_all_training_data(self, base_folder=None):
+        """Parse all the training data and generate all it's visualizations"""
+        search_folder = base_folder if base_folder else PARSE_ALL_FOLDER
+        for root, dirs, files in os.walk(search_folder, topdown=False):
+            for name in files:
+                if name.endswith('done.json'):
+                    folder = os.path.dirname(os.path.join(root, name))
+                    metrics = os.path.join(folder, 'metrics/')
+                    print(f"Processando pasta: {folder}")
+                    do_parse(folder, metrics)
     
     def disconnect(self):
         """Disconnect MQTT client"""
         self.client.disconnect()
         print("Cliente MQTT desconectado.")
+
+    def start_batch_federated_learning(self, batch_config_path, expected_clients=None):
+        """Start batch federated learning process from JSON configuration file"""
+        print('\33]0;Servidor Federado - Batch\a', end='', flush=True)
+        
+        # Load batch configuration
+        try:
+            with open(batch_config_path, 'r') as f:
+                batch_config = json.load(f)
+        except FileNotFoundError:
+            print(f"Arquivo de configuração não encontrado: {batch_config_path}")
+            return
+        except json.JSONDecodeError as e:
+            print(f"Erro ao decodificar JSON: {e}")
+            return
+        
+        if not isinstance(batch_config, list):
+            print("Configuração deve ser uma lista de objetos de teste")
+            return
+        
+        # Create batch-specific folder
+        batch_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        batch_folder_name = f"batch_{batch_timestamp}"
+        batch_base_path = os.path.join(WEIGHTS_FOLDER, batch_folder_name)
+        os.makedirs(batch_base_path, exist_ok=True)
+        
+        print(f"📁 Pasta do lote: {batch_base_path}")
+        
+        # Setup MQTT subscriptions
+        topics = [
+            (TOPIC_RECEIVE_FROM_DEVICES, 0),
+            (TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
+            (TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
+        ]
+        self.client.subscribe(topics)
+        self.client.loop_start()
+        
+        print(f"Iniciando processamento em lote de {len(batch_config)} configurações...")
+        
+        # Process each test configuration sequentially
+        successful_tests = 0
+        failed_tests = 0
+        
+        for test_index, test_config in enumerate(batch_config):
+            print(f"\n{'='*60}")
+            print(f"INICIANDO TESTE {test_index + 1} de {len(batch_config)}")
+            print(f"{'='*60}")
+            
+            # Validate test configuration
+            if not self._validate_test_config(test_config, test_index + 1):
+                print(f"❌ Teste {test_index + 1} falhou na validação. Continuando para o próximo teste.")
+                failed_tests += 1
+                continue
+            
+            # Run single federated learning session
+            success = self._run_single_batch_test(test_config, test_index + 1, expected_clients, batch_base_path)
+            
+            if not success:
+                print(f"❌ Teste {test_index + 1} falhou. Continuando para o próximo teste.")
+                failed_tests += 1
+            else:
+                print(f"✅ Teste {test_index + 1} concluído com sucesso.")
+                successful_tests += 1
+            
+            # Wait between tests if not the last one
+            if test_index < len(batch_config) - 1:
+                print(f"Aguardando 5 segundos antes do próximo teste...")
+                sleep(5)
+        
+        print(f"\n{'='*60}")
+        print("PROCESSAMENTO EM LOTE CONCLUÍDO")
+        print(f"{'='*60}")
+        print(f"📊 Resumo dos testes:")
+        print(f"   ✅ Testes bem-sucedidos: {successful_tests}")
+        print(f"   ❌ Testes falharam: {failed_tests}")
+        print(f"   📁 Total de testes: {len(batch_config)}")
+        print(f"   📁 Pasta do lote: {batch_base_path}")
+        
+        # Create batch summary file
+        batch_summary = {
+            "batch_started": batch_timestamp,
+            "batch_completed": datetime.now().isoformat(),
+            "total_tests": len(batch_config),
+            "successful_tests": successful_tests,
+            "failed_tests": failed_tests,
+            "batch_folder": batch_folder_name,
+            "config_file": batch_config_path,
+            "tests": []
+        }
+        
+        # Add test details to summary
+        for i, test_config in enumerate(batch_config):
+            test_info = {
+                "test_number": i + 1,
+                "name": test_config.get('name', f'batch_test_{i + 1}'),
+                "epochs": test_config['epochs'],
+                "rounds": test_config.get('rounds', 1),
+                "layers": test_config['layers'],
+                "seed": test_config['seed']
+            }
+            batch_summary["tests"].append(test_info)
+        
+        # Save batch summary
+        summary_path = os.path.join(batch_base_path, "batch_summary.json")
+        with open(summary_path, 'w') as f:
+            json.dump(batch_summary, f, indent=4, separators=(',', ':'))
+        
+        if successful_tests > 0:
+            print(f"✅ Processamento em lote concluído com {successful_tests} teste(s) bem-sucedido(s).")
+        else:
+            print(f"❌ Nenhum teste foi bem-sucedido.")
+        
+        print(f"📄 Resumo salvo em: {summary_path}")
+        
+        # Final cleanup
+        self._cleanup_federated_learning()
+    
+    def _validate_test_config(self, test_config, test_number):
+        """Validate individual test configuration"""
+        required_fields = ['epochs', 'layers', 'activationFunctions', 'learningRateWeights', 'learningRateBiases', 'seed']
+        
+        for field in required_fields:
+            if field not in test_config:
+                print(f"❌ Teste {test_number}: Campo obrigatório '{field}' não encontrado")
+                return False
+        
+        # Validate layers and activation functions match
+        layers = test_config['layers']
+        activation_funcs = test_config['activationFunctions']
+        
+        if not isinstance(layers, list) or len(layers) < 2:
+            print(f"❌ Teste {test_number}: 'layers' deve ser uma lista com pelo menos 2 elementos")
+            return False
+        
+        if not isinstance(activation_funcs, list) or len(activation_funcs) != len(layers) - 1:
+            print(f"❌ Teste {test_number}: 'activationFunctions' deve ter {len(layers) - 1} elementos")
+            return False
+        
+        # Validate numeric values
+        if not isinstance(test_config['epochs'], int) or test_config['epochs'] < 1:
+            print(f"❌ Teste {test_number}: 'epochs' deve ser um inteiro positivo")
+            return False
+        
+        if not isinstance(test_config['learningRateWeights'], (int, float)) or test_config['learningRateWeights'] <= 0:
+            print(f"❌ Teste {test_number}: 'learningRateWeights' deve ser um número positivo")
+            return False
+        
+        if not isinstance(test_config['learningRateBiases'], (int, float)) or test_config['learningRateBiases'] <= 0:
+            print(f"❌ Teste {test_number}: 'learningRateBiases' deve ser um número positivo")
+            return False
+        
+        if not isinstance(test_config['seed'], int):
+            print(f"❌ Teste {test_number}: 'seed' deve ser um inteiro")
+            return False
+        
+        return True
+    
+    def _run_single_batch_test(self, test_config, test_number, expected_clients, batch_base_path=None):
+        """Run a single federated learning test from batch configuration"""
+        
+        try:
+            # Initialize federated learning state for this test
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            test_name = test_config.get('name', f'batch_test_{test_number}')
+            
+            # Use batch_base_path if provided (for batch mode), otherwise use WEIGHTS_FOLDER (for single mode)
+            if batch_base_path:
+                self.state.federated_path = os.path.join(batch_base_path, f"{timestamp}_{test_name}")
+            else:
+                self.state.federated_path = os.path.join(WEIGHTS_FOLDER, f"{timestamp}_{test_name}")
+            self.state.current_round = 0
+            self.state.is_federated = True
+            self.state.connected_clients.clear()
+            
+            # Extract configuration
+            max_rounds = test_config.get('rounds', 1)  # Default to 1 round if not specified
+            
+            print(f"Configuração do teste {test_number}:")
+            print(f"  Nome: {test_name}")
+            print(f"  Épocas: {test_config['epochs']}")
+            print(f"  Camadas: {test_config['layers']}")
+            print(f"  Funções de ativação: {test_config['activationFunctions']}")
+            print(f"  Taxa de aprendizado (pesos): {test_config['learningRateWeights']}")
+            print(f"  Taxa de aprendizado (bias): {test_config['learningRateBiases']}")
+            print(f"  Seed: {test_config['seed']}")
+            print(f"  Rodadas: {max_rounds}")
+            print(f"  Enviar JSON weights: {test_config.get('sendJsonWeights', False)}")
+            
+            # Create directories
+            os.makedirs(self.state.federated_path, exist_ok=True)
+            os.makedirs(os.path.join(self.state.federated_path, str(self.state.current_round)), exist_ok=True)
+            
+            # Wait for client connections
+            print(f"Aguardando {CONNECTION_WAIT_TIME} segundos para conexão dos dispositivos...")
+
+            for i in range(COMMAND_RETRIES):
+                unsub_command = {"command": "federate_unsubscribe"}
+                self._send_command(json.dumps(unsub_command, separators=(',', ':')))
+                sleep(COMMAND_RETRY_INTERVAL)
+            
+            for i in range(COMMAND_RETRIES):
+                join_command = {"command": "federate_join"}
+                self._send_command(json.dumps(join_command, separators=(',', ':')))
+                sleep(COMMAND_RETRY_INTERVAL)
+            
+            if len(self.state.connected_clients) < 1:
+                print(f"❌ Teste {test_number}: Nenhum cliente conectado.")
+                return False
+            
+            if expected_clients and len(self.state.connected_clients) < expected_clients:
+                print(f"❌ Teste {test_number}: Número insuficiente de clientes conectados ({len(self.state.connected_clients)} de {expected_clients} esperados).")
+                self._send_unsubscribe_command()
+                return False
+            
+            print(f"✅ Teste {test_number} iniciado com {len(self.state.connected_clients)} clientes.")
+            
+            # Create start command with test-specific configuration
+            start_command = {
+                "command": "federate_start",
+                "config": {
+                    "layers": test_config['layers'],
+                    "actvFunctions": test_config['activationFunctions'],
+                    "epochs": test_config['epochs'],
+                    "learningRateOfWeights": test_config['learningRateWeights'],
+                    "learningRateOfBiases": test_config['learningRateBiases'],
+                    "randomSeed": test_config['seed'],
+                    "jsonWeights": test_config.get('sendJsonWeights', DEFAULT_SEND_JSON_WEIGHTS)
+                }
+            }
+            
+            # Initialize waiting list
+            self.state.waiting_for_clients = self.state.connected_clients.copy()
+            self.state.max_rounds = max_rounds
+            
+            self._send_command(json.dumps(start_command, separators=(',', ':')))
+            
+            # Save configuration with batch test info
+            self._save_federated_config(start_command, test_config, test_number)
+            
+            # Run federated learning loop for this test
+            success = self._run_single_test_loop()
+            
+            if success:
+                # Finalize this test
+                self._finalize_single_batch_test()
+            else:
+                # Mark test as failed but save partial results
+                failed_path = os.path.join(self.state.federated_path, "failed.json")
+                with open(failed_path, 'w') as f:
+                    json.dump({
+                        "failed_at": datetime.now().isoformat(),
+                        "test_number": test_number,
+                        "last_round": self.state.current_round
+                    }, f, indent=4, separators=(',', ':'))
+            
+            return success
+            
+        except Exception as e:
+            print(f"❌ Erro inesperado no teste {test_number}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            # Ensure cleanup happens even if test fails
+            try:
+                self._send_unsubscribe_command()
+                sleep(2)  # Give time for cleanup
+            except:
+                pass  # Ignore cleanup errors
+    
+    def _run_single_test_loop(self):
+        """Run federated learning loop for a single batch test"""
+        status_timer = 0
+        
+        while True:
+            sleep(1)
+            status_timer += 1
+            
+            # Check if all clients have submitted their models
+            if len(self.state.waiting_for_clients) == 0:
+                if self.state.current_round + 1 > self.state.max_rounds:
+                    print("Número máximo de rodadas atingido para este teste.")
+                    self.aggregate_weights(self.state.current_round)
+                    break
+                
+                print("Todos os arquivos recebidos para esta rodada.")
+                sleep(1)
+                
+                # Aggregate weights and send to clients
+                result = self.aggregate_weights(self.state.current_round)
+                if result is None:
+                    print("❌ Falha ao agregar pesos para este teste.")
+                    return False
+                
+                # Send binary aggregated weights to devices
+                aggregated_binary_path = os.path.join(
+                    self.state.federated_path,
+                    str(self.state.current_round),
+                    "aggregated_weights.nn"
+                )
+                self._send_binary_file(aggregated_binary_path)
+                sleep(1)
+                
+                # Prepare for next round
+                self.state.current_round += 1
+                next_round_dir = os.path.join(self.state.federated_path, str(self.state.current_round))
+                os.makedirs(next_round_dir, exist_ok=True)
+                
+                self.state.waiting_for_clients = self.state.connected_clients.copy()
+                print(f"Pesos enviados. Iniciando próximo round: {self.state.current_round}")
+                status_timer = 0
+                self.state.alive_clients.clear()
+
+            elif status_timer == STATUS_UPDATE_INTERVAL - 5:
+                self._send_command(json.dumps({"command": "federate_alive"}, separators=(',', ':')))
+                
+            elif status_timer >= STATUS_UPDATE_INTERVAL:
+                received_count = len(self.state.connected_clients) - len(self.state.waiting_for_clients)
+                total_count = len(self.state.connected_clients)
+
+                self.state.waiting_for_clients.sort()
+
+                print(f"Arquivos recebidos: {received_count} de {total_count}. "
+                      f"Aguardando: {self.state.waiting_for_clients} - Clientes ativos: {self.state.alive_clients}")
+                status_timer = 0
+        
+        return True
+    
+    def _finalize_single_batch_test(self):
+        """Finalize a single batch test"""
+        # Create final round directory
+        self.state.current_round += 1
+        final_round_dir = os.path.join(self.state.federated_path, str(self.state.current_round))
+        os.makedirs(final_round_dir, exist_ok=True)
+        
+        # Send end command
+        end_command = {"command": "federate_end"}
+        self._send_command(json.dumps(end_command, separators=(',', ':')))
+        sleep(2)  # Shorter wait between batch tests
+        
+        # Mark completion
+        done_path = os.path.join(self.state.federated_path, "done.json")
+        with open(done_path, 'w') as f:
+            json.dump({"completed_at": datetime.now().isoformat()}, f, indent=4, separators=(',', ':'))
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='MQTT Federated Server')
+    
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    
+    # Alive command
+    alive_parser = subparsers.add_parser('alive', help='Check alive devices')
+    
+    # Federate command
+    federate_parser = subparsers.add_parser('federate', help='Start federated learning')
+    federate_parser.add_argument('--rounds', '-r', type=int, required=True,
+                                help='Number of federated learning rounds')
+    federate_parser.add_argument('--clients', '-c', type=int, required=True,
+                                help='Number of expected clients')
+    
+    # Batch command
+    batch_parser = subparsers.add_parser('batch', help='Start batch federated learning from JSON config')
+    batch_parser.add_argument('--config', '-f', type=str, required=True,
+                             help='Path to JSON configuration file')
+    batch_parser.add_argument('--clients', '-c', type=int,
+                             help='Number of expected clients (optional)')
+    
+    # Parse command
+    parse_parser = subparsers.add_parser('parse', help='Parse training data and generate visualizations')
+    parse_parser.add_argument('--folder', '-f', type=str,
+                             help='Specific folder to parse (optional, uses default if not provided)')
+    
+    # ParseAll command
+    parseall_parser = subparsers.add_parser('parseall', help='Parse all training data and generate all visualizations')
+    parseall_parser.add_argument('--folder', '-f', type=str,
+                                help='Base folder to search for training data (optional, uses default if not provided)')
+    
+    # BatchCompare command
+    batchcompare_parser = subparsers.add_parser('batchcompare', help='Compare metrics across multiple batch test results')
+    batchcompare_parser.add_argument('--batch-folder', '-b', type=str, required=True,
+                                    help='Path to batch folder containing test results')
+    batchcompare_parser.add_argument('--output', '-o', type=str,
+                                    help='Output folder for comparison plots (optional)')
+    
+    # Unsub command
+    unsub_parser = subparsers.add_parser('unsub', help='Send unsubscribe command to clients')
+    
+    return parser.parse_args()
 
 
 def print_menu():
@@ -844,7 +1168,10 @@ def print_menu():
         "'request' \tpara solicitar modelos dos dispositivos",
         "'listen' \tpara montar um servidor que apenas escuta mensagens e salva",
         "'federate' \tpara abrir um servidor federado",
+        "'batch' \tpara executar processamento em lote com configuração JSON",
         "'parse' \tpara processar os dados e gerar visualizações",
+        "'parseall' \tpara processar todos os dados e gerar todas as visualizações",
+        "'batchcompare' \tpara comparar métricas entre testes de batch",
         "'alive' \tpara verificar dispositivos ativos",
         "'unsub' \tpara forçar encerramento do processo federativo nos clientes"
     ]
@@ -858,12 +1185,62 @@ def print_menu():
 
 def main():
     """Main application entry point"""
-    print('\33]0;Escolha comando\a', end='', flush=True)
+    # Parse command line arguments
+    args = parse_arguments()
     
     # Initialize server
     server = MQTTFederatedServer()
     
     try:
+        # If command line arguments are provided, execute directly
+        if args.command:
+            if args.command == 'alive':
+                print("Executando comando 'alive'...")
+                server.check_alive_devices()
+                
+            elif args.command == 'federate':
+                print(f"Iniciando servidor federado com {args.rounds} rodadas e {args.clients} clientes esperados...")
+                server.start_federated_learning(max_rounds=args.rounds, expected_clients=args.clients)
+                
+            elif args.command == 'batch':
+                print(f"Iniciando processamento em lote usando configuração: {args.config}")
+                if args.clients:
+                    print(f"Esperando {args.clients} clientes...")
+                server.start_batch_federated_learning(args.config, expected_clients=args.clients)
+                
+            elif args.command == 'parse':
+                print("Processando dados de treinamento e gerando visualizações...")
+                if args.folder:
+                    print(f"Usando pasta especificada: {args.folder}")
+                server.parse_training_data(args.folder)
+                
+            elif args.command == 'parseall':
+                print("Processando todos os dados de treinamento e gerando todas as visualizações...")
+                if args.folder:
+                    print(f"Buscando dados na pasta: {args.folder}")
+                server.parse_all_training_data(args.folder)
+                
+            elif args.command == 'batchcompare':
+                print("Comparando métricas entre testes de batch...")
+                batch_folder = args.batch_folder
+                output_folder = args.output if args.output else None
+                
+                plot_batch_comparison(batch_folder, output_folder)
+                if output_folder:
+                    print(f"Comparação concluída! Gráficos salvos em: {output_folder}")
+                else:
+                    print(f"Comparação concluída! Gráficos salvos em: {os.path.join(batch_folder, 'metrics')}")
+                
+            elif args.command == 'unsub':
+                print("Enviando comando de unsubscribe...")
+                server._send_unsubscribe_command()
+                sleep(2)  # Give time for the command to be sent
+                
+            return  # Exit after executing the command
+        
+        # If no command line arguments, use interactive menu
+        print('\33]0;Escolha comando\a', end='', flush=True)
+        
         while True:
             user_input = print_menu()
             
@@ -879,8 +1256,38 @@ def main():
             elif user_input == 'federate':
                 server.start_federated_learning()
                 
+            elif user_input == 'batch':
+                config_path = input("Digite o caminho para o arquivo de configuração JSON: ").strip()
+                try:
+                    clients_input = input("Digite o número de clientes esperados (opcional, pressione Enter para pular): ").strip()
+                    expected_clients = int(clients_input) if clients_input else None
+                except ValueError:
+                    expected_clients = None
+                server.start_batch_federated_learning(config_path, expected_clients)
+                
             elif user_input == 'parse':
-                server.parse_training_data()
+                folder = input("Digite o caminho da pasta para processar (ou pressione Enter para usar padrão): ").strip()
+                folder = folder if folder else None
+                server.parse_training_data(folder)
+            
+            elif user_input == 'parseall':
+                folder = input("Digite o caminho da pasta base para buscar dados (ou pressione Enter para usar padrão): ").strip()
+                folder = folder if folder else None
+                server.parse_all_training_data(folder)
+                
+            elif user_input == 'batchcompare':
+                batch_folder = input("Digite o caminho da pasta do batch: ").strip()
+                output_folder = input("Digite o caminho de saída (ou pressione Enter para usar padrão batch_folder/metrics/): ").strip()
+                
+                if not output_folder:
+                    output_folder = None
+                
+                print("Comparando métricas entre testes do batch...")
+                plot_batch_comparison(batch_folder, output_folder)
+                if output_folder:
+                    print(f"Comparação concluída! Gráficos salvos em: {output_folder}")
+                else:
+                    print(f"Comparação concluída! Gráficos salvos em: {os.path.join(batch_folder, 'metrics')}")
                 
             elif user_input == 'unsub':
                 server._send_unsubscribe_command()
