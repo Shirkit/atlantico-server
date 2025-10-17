@@ -32,11 +32,9 @@ def test_batch_folder_structure():
         temp_config_file = f.name
     
     try:
-        # Import the server class
-        import sys
-        sys.path.append('/home/shirkit/Projects/Github/atlantico-server')
-        from novoServidor import MQTTFederatedServer, WEIGHTS_FOLDER
-        
+        # Import the server class from the package
+        from atlantico_server.server import MQTTFederatedServer, WEIGHTS_FOLDER
+
         # Create server instance (won't actually connect to MQTT for this test)
         server = MQTTFederatedServer()
         

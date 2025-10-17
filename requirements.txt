@@ -1,0 +1,12 @@
+# Requirements for the legacy server application
+# Keep pins conservative; update as needed for your environment.
+
+# Pin paho-mqtt to the 1.6.x series used by the project
+paho-mqtt==1.6.1
+numpy>=1.22.0
+matplotlib>=3.5.0
+seaborn>=0.12.0
+
+# Optional (used by some scripts if present):
+# pandas>=1.5.0
+# scikit-learn>=1.0.0

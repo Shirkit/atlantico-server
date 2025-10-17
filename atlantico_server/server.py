@@ -1,3 +1,11 @@
+"""Main server implementation (renamed from `novoServidor.py`).
+
+This module contains the full MQTT federated server implementation. The
+original `novoServidor.py` top-level script has been removed to avoid
+duplication; use `python server.py` from the repo root or run
+`python -m atlantico_server.server` to execute the CLI.
+"""
+
 import json
 import paho.mqtt.client as mqtt
 from datetime import datetime
@@ -10,8 +18,8 @@ import struct
 import numpy as np
 import argparse
 import sys
-from parser import do_parse, plot_batch_comparison
-from reader import read_nn_binary_with_activation
+from .parser import do_parse, plot_batch_comparison
+from .reader import read_nn_binary_with_activation
 
 # Global configuration constants
 BROKER_IP = "127.0.0.1"
@@ -82,7 +90,9 @@ class MQTTFederatedServer:
     """Main federated learning server class"""
     
     def __init__(self):
-        self.client = mqtt.Client(client_id=f"Notebook-{uuid.uuid4()}", clean_session=True)
+        # Use a short, human-friendly id suffix (8 hex chars) for broker logs
+        short_id = uuid.uuid4().hex[:8]
+        self.client = mqtt.Client(client_id=f"Aggregrator-{short_id}", clean_session=True)
         self.state = FederatedServerState()
         self._setup_mqtt_client()
         self.debug = False
@@ -125,7 +135,7 @@ class MQTTFederatedServer:
             print(f"Payload: {message.payload}")
         except Exception as e:
             print(f"Erro inesperado ao processar mensagem: {e}")
-            print(traceback.format_exc(e))
+            print(traceback.format_exc())
     
     def _handle_raw_push_message(self, topic_parts, payload):
         """Handle raw neural network file uploads"""
@@ -440,7 +450,7 @@ class MQTTFederatedServer:
         if not networks:
             print("Nenhum dado válido para agregação binária.")
             return None
-        
+
         # Verify all networks have the same structure
         first_network = networks[0]
         for i, network in enumerate(networks[1:], 1):

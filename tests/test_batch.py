@@ -38,10 +38,8 @@ def test_config_validation():
     """Test configuration validation"""
     print("Testing configuration validation...")
     
-    # Import the server class
-    import sys
-    sys.path.append('/home/shirkit/Projects/Github/atlantico-server')
-    from novoServidor import MQTTFederatedServer
+    # Import the server class from the package
+    from atlantico_server.server import MQTTFederatedServer
     
     server = MQTTFederatedServer()
     

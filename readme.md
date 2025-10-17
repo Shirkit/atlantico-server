@@ -58,7 +58,7 @@ sudo systemctl start mosquitto
 
 ### 1. Iniciar o servidor federado
 
-python3 novoServidor.py
+python3 server.py
 
 ### 2. Rode o comando desejado
 
