@@ -14,15 +14,28 @@ Quick setup (Linux / Debian/Ubuntu):
 
    pip install -r requirements.txt
 
-3. Start a local Mosquitto broker using the repository config (recommended for local development):
+3. Start a local Mosquitto broker using the repository-supplied helper (recommended for local development):
 
-   mosquitto -c run/mosquitto.conf
+   # start broker in background (daemon-like)
+   ./scripts/mosquitto_control.sh start_background
 
-   (or install system mosquitto and run as a service)
+   # or run in the foreground (attached to your terminal)
+   ./scripts/mosquitto_control.sh start
 
-4. Run the server CLI:
+   # other helper actions: stop, restart, restart_background, status
+   ./scripts/mosquitto_control.sh status
 
-   python server.py --help
+   (you may also use system mosquitto directly if preferred)
+
+4. Run the server CLI using the repo helper (ensures repo root is CWD and prefers `.venv`):
+
+   # show help
+   ./scripts/start_server.sh --help
+
+   # run a command, for example: list alive devices
+   ./scripts/start_server.sh alive
+
+   The helper will use `.venv/bin/python` if a `.venv` exists; activate the venv manually if you prefer.
 
 Notes
 - The project expects MQTT messages where metrics are JSON and model payloads are binary.
