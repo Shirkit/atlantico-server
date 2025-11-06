@@ -73,8 +73,8 @@ def read_nn_binary_with_activation(filepath, debug=False):
                 print(f"  Dimensions: {inputs} -> {outputs}")
             
             # Validate dimensions
-            if inputs > 1000 or outputs > 1000:
-                raise ValueError(f"Unreasonable layer size: {inputs} -> {outputs}")
+            #if inputs > 1000 or outputs > 1000:
+            #    raise ValueError(f"Unreasonable layer size: {inputs} -> {outputs}")
             
             # Find where the next layer starts (or end of file)
             if layer_idx + 1 < num_layers:

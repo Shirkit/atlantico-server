@@ -45,8 +45,8 @@ METRICS_FOLDER = "metrics/"
 # Federated learning configuration
 DEFAULT_LAYERS = [3, 40, 30, 20, 10, 6]
 DEFAULT_ACTIVATION_FUNCTIONS = [1, 1, 1, 1, 6]
-# DEFAULT_LAYERS = [3, 200, 110, 60, 33, 20, 12, 6]
-# DEFAULT_ACTIVATION_FUNCTIONS = [1, 1, 1, 1, 1, 1, 6]
+#DEFAULT_LAYERS = [3, 2000, 1100, 600, 330, 200, 120, 60, 30, 15, 6]
+#DEFAULT_ACTIVATION_FUNCTIONS = [1, 1, 1, 1, 1, 1, 1, 1, 1, 6]
 # DEFAULT_LAYERS = [3, 100, 80, 60, 40, 20, 10, 6]
 # DEFAULT_ACTIVATION_FUNCTIONS = [1, 1, 1, 1, 1, 1, 6]
 DEFAULT_EPOCHS = 1
@@ -58,7 +58,7 @@ DEFAULT_SEND_JSON_WEIGHTS = False
 # Timing constants
 CONNECTION_WAIT_TIME = 10
 COMMAND_RETRY_INTERVAL = 3
-COMMAND_RETRIES = 3
+COMMAND_RETRIES = 1
 STATUS_UPDATE_INTERVAL = 30
 
 
@@ -404,7 +404,8 @@ class MQTTFederatedServer:
             if os.path.exists(filepath):
                 with open(filepath, "rb") as file:
                     content = file.read()
-                    print(f"Enviando arquivo binário {filepath} via MQTT ({len(content)} bytes)...")
+                    
+                    print(f"Enviando arquivo binário {filepath} via MQTT ({len(content)} bytes / {len(content)/1024} KB) / {len(content)/1024/1024} MB...")
                     self.client.publish(topic, content)
             else:
                 print(f"Arquivo binário {filepath} não encontrado.")
@@ -1125,6 +1126,15 @@ class MQTTFederatedServer:
         with open(done_path, 'w') as f:
             json.dump({"completed_at": datetime.now().isoformat()}, f, indent=4, separators=(',', ':'))
 
+    def ensure_connected(self):
+        """Ensure MQTT client is connected"""
+        if self.client.is_connected():
+            return
+
+        if not self.client.reconnect():
+            if not self.client.connect(BROKER_IP, BROKER_PORT, BROKER_KEEPALIVE):
+                print("Falha ao reconectar ao MQTT.")
+
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='MQTT Federated Server')
@@ -1253,6 +1263,8 @@ def main():
         
         while True:
             user_input = print_menu()
+
+            # server.ensure_connected()
             
             if user_input == 'send':
                 server.send_aggregated_weights()
