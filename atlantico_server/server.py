@@ -22,7 +22,7 @@ from .parser import do_parse, plot_batch_comparison
 from .reader import read_nn_binary_with_activation
 
 # Global configuration constants
-BROKER_IP = "127.0.0.1"
+BROKER_IP = os.getenv("MQTT_BROKER_HOST", "127.0.0.1")
 BROKER_PORT = 1883
 BROKER_KEEPALIVE = 60
 
@@ -718,6 +718,7 @@ class MQTTFederatedServer:
     def start_listening_mode(self):
         """Start listening mode - just receive and save messages"""
         print('\33]0;Listen - Servidor Federado\a', end='', flush=True)
+        self.client.loop_stop()
         
         topics = [
             (TOPIC_RECEIVE_FROM_DEVICES, 0),
@@ -737,6 +738,7 @@ class MQTTFederatedServer:
     
     def check_alive_devices(self):
         """Check which devices are alive"""
+        self.client.loop_stop()
         topics = [(TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)]
         self.client.subscribe(topics)
         
@@ -1126,15 +1128,6 @@ class MQTTFederatedServer:
         with open(done_path, 'w') as f:
             json.dump({"completed_at": datetime.now().isoformat()}, f, indent=4, separators=(',', ':'))
 
-    def ensure_connected(self):
-        """Ensure MQTT client is connected"""
-        if self.client.is_connected():
-            return
-
-        if not self.client.reconnect():
-            if not self.client.connect(BROKER_IP, BROKER_PORT, BROKER_KEEPALIVE):
-                print("Falha ao reconectar ao MQTT.")
-
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='MQTT Federated Server')
@@ -1208,12 +1201,11 @@ def main():
     # Parse command line arguments
     args = parse_arguments()
     
-    # Initialize server
-    server = MQTTFederatedServer()
-    
     try:
         # If command line arguments are provided, execute directly
         if args.command:
+            server = MQTTFederatedServer()
+
             if args.command == 'alive':
                 print("Executando comando 'alive'...")
                 server.check_alive_devices()
@@ -1260,11 +1252,13 @@ def main():
         
         # If no command line arguments, use interactive menu
         print('\33]0;Escolha comando\a', end='', flush=True)
-        
+
+        server = MQTTFederatedServer()
+
+        server.client.loop_start()
+
         while True:
             user_input = print_menu()
-
-            # server.ensure_connected()
             
             if user_input == 'send':
                 server.send_aggregated_weights()
@@ -1316,6 +1310,7 @@ def main():
                 
             elif user_input == 'alive':
                 server.check_alive_devices()
+                break
                 
             else:
                 print("Comando inválido. Tente novamente.")

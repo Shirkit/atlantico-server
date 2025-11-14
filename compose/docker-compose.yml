@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    networks:
+      - atlantico_net
+
+  atlantico-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: atlantico-server
+    depends_on:
+      - mosquitto
+    volumes:
+      - ../run/logs:/app/run/logs
+      - ../weights:/app/weights
+      - ../metrics:/app/metrics
+      - ../parse:/app/parse
+      - ../parse_all:/app/parse_all
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+    command: python server.py
+    networks:
+      - atlantico_net
+
+  atlantico-raspberry:
+    profiles: ["device"]
+    build:
+      context: ../../atlantico-raspberry
+      dockerfile: Dockerfile
+    depends_on:
+      - mosquitto
+    volumes:
+      - ../../atlantico-raspberry/data_ready/${DEVICE_ID:-0}:/app/data:ro
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+    command: >
+      sh -c "
+        echo 'Waiting for mosquitto to start...' &&
+        while ! nc -z mosquitto 1883; do
+          sleep 1
+        done &&
+        echo 'Mosquitto started' &&
+        python -m atlantico_rpi.device --connect --run-for 0 --broker mosquitto --data-dir /app/data
+      "
+    networks:
+      - atlantico_net
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+
+networks:
+  atlantico_net:
+    driver: bridge
