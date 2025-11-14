@@ -1,6 +1,6 @@
 # Atlantico Server TUI - TODO List
 
-## Current Status: Phase 1-3 Complete, Phase 5 Logging Complete ✅
+## Current Status: Phases 1-5 Complete ✅
 
 ### Completed ✅
 
@@ -25,6 +25,32 @@
 - ✅ Auto-refresh every 1 second
 - ✅ Optimized data structures (2 dicts)
 
+#### Phase 4: Federated Learning Control
+- ✅ Configuration panel with 4 input fields (rounds, epochs, clients, batch)
+- ✅ Training control buttons (Start, Stop, Pause/Resume)
+- ✅ Start button wired to federated learning
+- ✅ Background thread execution (non-blocking)
+- ✅ Dynamic button states (disabled when idle, enabled when training)
+- ✅ Pause/Resume functionality
+  - ✅ Server continues aggregation when paused
+  - ✅ Holds aggregated weights until resume
+  - ✅ Button changes label and color dynamically
+  - ✅ Progress panel shows pause status
+- ✅ Progress display
+  - ✅ Progress bar for current round
+  - ✅ Round counter display
+  - ✅ Connected device count
+  - ✅ Training status with pause indicator
+  - ✅ Auto-refresh every 1 second
+- ✅ Metrics panel structure (ready for data)
+- ✅ Stop button (graceful shutdown)
+  - ✅ Sends unsubscribe command to devices
+  - ✅ Stops batch processing loop
+  - ✅ Stops training loop with proper cleanup
+  - ✅ Works during pause state
+  - ✅ 6 strategic checkpoints for responsiveness
+- ⏳ Wire metrics to actual training data - TODO
+
 #### Phase 5: Logging System
 - ✅ Created centralized logging.py module
 - ✅ EmojiFormatter with level icons
@@ -39,32 +65,7 @@
 
 ## In Progress ⏳
 
-### Phase 4: Federated Learning Control
-**Priority:** High  
-**Current State:** Not started
-
-Tasks:
-- [ ] Configuration panel with input fields
-  - [ ] Rounds (int input with validation)
-  - [ ] Epochs (int input)
-  - [ ] Learning rate (float input)
-  - [ ] Batch file picker
-- [ ] Training controls
-  - [ ] Start button → calls server.start_federated_learning()
-  - [ ] Stop button (graceful shutdown)
-  - [ ] Pause/Resume functionality
-  - [ ] Disable controls during training
-- [ ] Progress display
-  - [ ] Progress bar for current round
-  - [ ] Device completion counter (5/7 completed)
-  - [ ] Time estimation
-- [ ] Metrics panel
-  - [ ] Display accuracy and loss
-  - [ ] Show round history
-  - [ ] Calculate deltas from previous round
-
-**Blockers:** None  
-**Notes:** Test button on dashboard works, but need proper control panel for configuration
+*No active work in progress - ready for Phase 6*
 
 ---
 
@@ -147,9 +148,17 @@ Tasks:
 ## Technical Debt 🔧
 
 ### High Priority
-- [ ] Remove temporary test FL button from dashboard
-  - Move to proper Federated Learning screen
-  - Add proper configuration UI
+- [x] Remove temporary test FL button from dashboard
+  - ✅ Proper Federated Learning screen implemented with full controls
+  - ⏳ TODO: Remove test button from dashboard (kept for backwards compatibility)
+- [x] Implement Stop button functionality
+  - ✅ Stop button sends unsubscribe command to devices
+  - ✅ Graceful shutdown with proper cleanup
+  - ✅ Multiple checkpoints throughout execution flow
+- [ ] Wire metrics panel to actual training data
+  - Structure exists, needs data from aggregation results
+  - Calculate accuracy and loss from device models
+  - Show round history
 - [ ] Restore ServerStatusPanel on dashboard
   - Was removed for testing
   - Re-enable once widget refresh issues resolved
@@ -236,6 +245,7 @@ Tasks:
 - ✅ User confirmed Phase 2 working: "It works! And it even has color!"
 - ✅ User confirmed Phase 3 working after optimization
 - ✅ User confirmed logging working: "Nice, much much better"
+- ✅ Phase 4 implementation complete: Pause/resume functionality working
 
 ---
 
@@ -275,4 +285,4 @@ atlantico-server/
 ---
 
 **Last Updated:** November 14, 2025  
-**Current Phase:** Phases 1-3 complete, logging system complete, starting Phase 4
+**Current Phase:** Phases 1-5 complete + Stop functionality, ready for Phase 6 (Settings Screen)

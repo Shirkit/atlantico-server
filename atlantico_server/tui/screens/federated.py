@@ -305,8 +305,22 @@ class FederatedView(Vertical):
     
     def stop_training(self):
         """Stop training (graceful shutdown)"""
-        # TODO: Implement graceful stop
-        self.control_panel.set_training_state(False)
+        if not self.server:
+            return
+        
+        # Request graceful stop
+        if self.server.stop_federated_learning():
+            # Button states will be updated by the training thread when it finishes
+            self._log_message("🛑 Stop solicitado - aguardando conclusão da rodada atual...")
+    
+    def _log_message(self, message: str):
+        """Helper to log messages (if logger available)"""
+        try:
+            from atlantico_server.logging import get_logger
+            logger = get_logger(__name__)
+            logger.info(message)
+        except:
+            pass
     
     def pause_training(self):
         """Pause/resume training"""

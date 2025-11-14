@@ -78,6 +78,7 @@ class FederatedServerState:
         self.debug = False
         self.is_paused = False
         self.paused_aggregated_path: str | None = None  # Store path to aggregated weights when paused
+        self.stop_requested = False  # Flag to gracefully stop federated learning
     
     @property
     def waiting_for_clients(self):
@@ -95,6 +96,7 @@ class FederatedServerState:
         self.federated_clients.clear()
         self.is_paused = False
         self.paused_aggregated_path = None
+        self.stop_requested = False
 
 
 class MQTTFederatedServer:
@@ -767,6 +769,20 @@ class MQTTFederatedServer:
         self._log("▶️  Federated learning retomado")
         return True
     
+    def stop_federated_learning(self):
+        """Request graceful stop of federated learning"""
+        if not self.state.is_federated:
+            self._log("❌ Federated learning não está ativo")
+            return False
+        
+        if self.state.stop_requested:
+            self._log("⚠️  Stop já foi solicitado")
+            return False
+        
+        self.state.stop_requested = True
+        self._log("🛑 Solicitando parada graceful do federated learning...")
+        return True
+    
     def start_listening_mode(self):
         """Start listening mode - just receive and save messages"""
         self._log("👂 Iniciando modo de escuta...")
@@ -891,8 +907,13 @@ class MQTTFederatedServer:
             success = self._run_single_batch_test(test_config, test_index + 1, expected_clients, batch_base_path)
             
             if not success:
-                self._log(f"❌ Teste {test_index + 1} falhou. Continuando para o próximo teste.")
+                self._log(f"❌ Teste {test_index + 1} falhou.")
                 failed_tests += 1
+                # If stop was requested, break out of batch loop
+                if self.state.stop_requested:
+                    self._log("🛑 Interrompendo processamento em lote devido ao stop")
+                    break
+                self._log("Continuando para o próximo teste...")
             else:
                 self._log(f"✅ Teste {test_index + 1} concluído com sucesso.")
                 successful_tests += 1
@@ -900,7 +921,12 @@ class MQTTFederatedServer:
             # Wait between tests if not the last one
             if test_index < len(batch_config) - 1:
                 self._log(f"⏳ Aguardando 5 segundos antes do próximo teste...")
-                sleep(5)
+                # Check for stop during wait
+                for _ in range(5):
+                    if self.state.stop_requested:
+                        self._log("🛑 Stop solicitado durante espera entre testes")
+                        break
+                    sleep(1)
         
         self._log(f"\n{'='*60}")
         self._log("PROCESSAMENTO EM LOTE CONCLUÍDO")
@@ -1112,6 +1138,10 @@ class MQTTFederatedServer:
             sleep(1)
             status_timer += 1
             
+            # Check if stop was requested
+            if self.state.stop_requested:
+                break
+            
             # Check if all clients have submitted their models
             if len(self.state.waiting_for_clients) == 0:
                 if self.state.current_round + 1 > self.state.max_rounds:
@@ -1138,9 +1168,14 @@ class MQTTFederatedServer:
                 if self.state.is_paused:
                     self.state.paused_aggregated_path = aggregated_binary_path
                     self._log("⏸️  Treinamento pausado - pesos agregados mas não enviados")
-                    # Wait until resumed
-                    while self.state.is_paused:
+                    # Wait until resumed (or stopped)
+                    while self.state.is_paused and not self.state.stop_requested:
                         sleep(0.5)
+                    
+                    # Check if stopped while paused
+                    if self.state.stop_requested:
+                        break
+                    
                     self._log("▶️  Treinamento retomado - enviando pesos agregados")
                 
                 self._send_binary_file(aggregated_binary_path)
@@ -1174,6 +1209,14 @@ class MQTTFederatedServer:
 
                 self._log(f"📊 Status: {received_count}/{total_count} recebidos | Aguardando: {waiting} | Ativos: {alive_count}")
                 status_timer = 0
+        
+        # Check if loop was broken due to stop request
+        if self.state.stop_requested:
+            self._log(f"🛑 Stop solicitado - encerrando rodada {self.state.current_round}/{self.state.max_rounds}")
+            self._log("📤 Enviando comando de unsubscribe para os dispositivos...")
+            self._send_unsubscribe_command()
+            sleep(2)  # Give time for devices to receive and process
+            return False
         
         return True
     
