@@ -332,53 +332,59 @@ atlantico_server/
 ### Phase 2: Dashboard Screen (Tasks 5a)
 **Goal:** Implement main dashboard with server status
 
-1. Create Dashboard screen layout
-   - Status panel (server state, connection info)
-   - Quick actions (buttons)
-   - Recent activity log (scrollable)
+1. ✅ Create Dashboard screen layout
+   - ✅ Simplified layout with title and device count
+   - ✅ Quick action button (Start Test FL)
+   - ✅ Recent activity panel with RichLog widget
 
-2. Connect to MQTTFederatedServer
-   - Pass server instance to TUI app
-   - Display real-time connection status
-   - Show connected device count
+2. ✅ Connect to MQTTFederatedServer
+   - ✅ Pass server instance to TUI app
+   - ✅ Display device count
+   - ✅ Show connection status
 
-3. Implement quick actions
-   - Wire buttons to server methods
-   - Add loading/success/error feedback
+3. ✅ Implement quick actions
+   - ✅ Test FL button wired to federated learning
+   - ✅ Runs in background thread (non-blocking)
 
-4. Activity feed
-    - Create event queue for server actions
-   - Display last N events with timestamps
-   - Auto-scroll to bottom
+4. ✅ Activity feed
+   - ✅ Auto-tails last 10 lines from run/logs/server.log
+   - ✅ Uses RichLog for proper formatting
+   - ✅ Auto-refreshes every 0.5 seconds
+   - ✅ Only updates when log file changes
 
-**Deliverable:** Functional dashboard showing live server state  
-**Validation:** ⏳ Awaiting user feedback before proceeding to Phase 3
+**Deliverable:** ✅ Functional dashboard showing live server state  
+**Validation:** ✅ User confirmed working! "It works! And it even has color!"
+
+**Key Changes from Original Plan:**
+- Simplified dashboard (removed ServerStatusPanel temporarily for testing)
+- Activity feed reads from log file instead of maintaining separate event list
+- Used RichLog widget for better formatting and color support
 
 ### Phase 3: Device Monitor Screen (Tasks 5b)
 **Goal:** Real-time device status monitoring
 
-1. Create device table widget
-   - Use Textual DataTable widget
-   - Columns: Device ID, Status, Last Seen, Round, Accuracy
-   - Color-coded status indicators (green/red)
+1. ✅ Create device table widget
+   - ✅ Two DataTable widgets: Training and Completed
+   - ✅ Columns: Device, Round, Epochs, Samples, Accuracy, Loss
+   - ✅ Color-coded states (🔄 Training, ✅ Done, 🏁 Completed)
 
-2. Connect to server state
-   - Read from `state.connected_clients`, `state.alive_clients`
-   - Update table on state changes
-   - Calculate time since last seen
+2. ✅ Connect to server state
+   - ✅ Read from optimized data structures (2 dicts instead of 4 arrays)
+   - ✅ Auto-refresh every 1 second
+   - ✅ Efficient state synchronization
 
-3. Device details panel
-   - Show selected device info
-   - Display device-specific metrics
-   - Update in real-time
+3. ✅ Device progress tracking
+   - ✅ Progress indicators: Training → Done → Completed
+   - ✅ Real-time metric updates
+   - ✅ Proper state transitions
 
-4. Implement check alive
-   - Wire button to `check_alive_devices()`
-   - Show loading indicator
-   - Update table when responses arrive
+4. ✅ Dual table layout
+   - ✅ Top table: Active training devices
+   - ✅ Bottom table: Completed devices
+   - ✅ Auto-removes from training when done
 
-**Deliverable:** Live device monitoring with status updates  
-**Validation:** ⏳ Awaiting user feedback before proceeding to Phase 4
+**Deliverable:** ✅ Live device monitoring with dual tables  
+**Validation:** ✅ User confirmed working after state optimization
 
 ### Phase 4: Federated Learning Screen (Tasks 5c)
 **Goal:** Interactive training control
@@ -409,28 +415,36 @@ atlantico_server/
 ### Phase 5: Logs Screen (Tasks 5d)
 **Goal:** Comprehensive log viewing
 
-1. Log widget setup
-   - Use Textual Log widget (auto-scrolling RichLog)
-   - Color coding by level
-   - Timestamp formatting
+1. ✅ Log widget setup
+   - ✅ Use RichLog widget (auto-scrolling)
+   - ✅ Emoji icons for log levels (🔍 DEBUG, ℹ️ INFO, ⚠️ WARNING, ❌ ERROR, 🚨 CRITICAL)
+   - ✅ Timestamp formatting [HH:MM:SS]
 
-2. Logging integration
-   - Redirect Python logging to TUI widget
-   - Custom handler for Textual compatibility
-   - Buffer management (don't overflow memory)
+2. ✅ Logging integration
+   - ✅ Created centralized atlantico_server/logging.py module
+   - ✅ File-based logging to run/logs/server.log
+   - ✅ TUI tails log file (no stdout capture)
+   - ✅ Thread-safe logging from MQTT callbacks
 
-3. Filtering
-   - Buttons to filter by level
-   - Search functionality (optional)
-   - Clear logs button
+3. ⏳ Filtering (Future)
+   - ⏳ Buttons to filter by level
+   - ⏳ Search functionality
+   - ⏳ Clear logs button
 
-4. Export functionality
-   - Save logs to file
-   - Choose export path
-   - Status feedback
+4. ⏳ Export functionality (Future)
+   - ✅ Logs already saved to file
+   - ⏳ UI for choosing export location
+   - ⏳ Copy to different destination
 
-**Deliverable:** Complete log viewing experience  
-**Validation:** ⏳ Awaiting user feedback before proceeding to Phase 6
+**Deliverable:** ✅ Complete log viewing with file tailing  
+**Validation:** ✅ User confirmed working! Fixed double timestamp and stdout interference issues
+
+**Key Architecture Decisions:**
+- **File-based logging:** All logs written to run/logs/server.log
+- **No stdout in TUI mode:** Prevents log pollution in dashboard (enable_stdout=False)
+- **TUI tails file:** Logs screen reads file every 0.5s, shows new lines
+- **Dashboard shows last 10:** Activity feed also tails file, displays last 10 lines
+- **Clean separation:** One logging system, multiple display methods
 
 ### Phase 6: Settings Screen (Tasks 5e)
 **Goal:** Configuration management

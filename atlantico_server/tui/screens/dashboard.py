@@ -6,7 +6,7 @@ from textual.reactive import reactive
 import os
 
 
-class ServerStatusPanel(Static):
+class ServerStatusPanel(Container):
     """Panel showing server connection status"""
     
     is_connected = reactive(False)
@@ -65,7 +65,7 @@ class ServerStatusPanel(Static):
             round_widget.update("Training Round: Not started")
 
 
-class QuickActionsPanel(Static):
+class QuickActionsPanel(Container):
     """Panel with quick action buttons"""
     
     def __init__(self, server=None):
@@ -83,7 +83,7 @@ class QuickActionsPanel(Static):
         )
 
 
-class ActivityFeedPanel(Static):
+class ActivityFeedPanel(Container):
     """Panel showing recent activity - reads last 10 lines from log file"""
     
     def __init__(self, log_file="run/logs/server.log"):

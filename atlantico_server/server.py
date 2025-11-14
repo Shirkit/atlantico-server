@@ -76,6 +76,8 @@ class FederatedServerState:
         self.connected_clients = {}  # {device_id: {'last_seen': timestamp}}
         self.federated_clients = {}  # {device_id: {'round': int, 'progress': str, 'last_update': timestamp}}
         self.debug = False
+        self.is_paused = False
+        self.paused_aggregated_path: str | None = None  # Store path to aggregated weights when paused
     
     @property
     def waiting_for_clients(self):
@@ -91,6 +93,8 @@ class FederatedServerState:
         self.max_rounds = 0
         self.connected_clients.clear()
         self.federated_clients.clear()
+        self.is_paused = False
+        self.paused_aggregated_path = None
 
 
 class MQTTFederatedServer:
@@ -735,6 +739,34 @@ class MQTTFederatedServer:
         """Clean up federated learning state"""
         self.state.reset()
     
+    def pause_federated_learning(self):
+        """Pause federated learning - continue aggregation but don't send weights"""
+        if not self.state.is_federated:
+            self._log("❌ Federated learning não está ativo")
+            return False
+        
+        if self.state.is_paused:
+            self._log("⚠️  Federated learning já está pausado")
+            return False
+        
+        self.state.is_paused = True
+        self._log("⏸️  Federated learning pausado")
+        return True
+    
+    def resume_federated_learning(self):
+        """Resume federated learning - send accumulated weights"""
+        if not self.state.is_federated:
+            self._log("❌ Federated learning não está ativo")
+            return False
+        
+        if not self.state.is_paused:
+            self._log("⚠️  Federated learning não está pausado")
+            return False
+        
+        self.state.is_paused = False
+        self._log("▶️  Federated learning retomado")
+        return True
+    
     def start_listening_mode(self):
         """Start listening mode - just receive and save messages"""
         self._log("👂 Iniciando modo de escuta...")
@@ -1096,12 +1128,21 @@ class MQTTFederatedServer:
                     self._log("❌ Falha ao agregar pesos para este teste.")
                     return False
                 
-                # Send binary aggregated weights to devices
+                # Send binary aggregated weights to devices (unless paused)
                 aggregated_binary_path = os.path.join(
                     self.state.federated_path,
                     str(self.state.current_round),
                     "aggregated_weights.nn"
                 )
+                
+                if self.state.is_paused:
+                    self.state.paused_aggregated_path = aggregated_binary_path
+                    self._log("⏸️  Treinamento pausado - pesos agregados mas não enviados")
+                    # Wait until resumed
+                    while self.state.is_paused:
+                        sleep(0.5)
+                    self._log("▶️  Treinamento retomado - enviando pesos agregados")
+                
                 self._send_binary_file(aggregated_binary_path)
                 sleep(1)
                 
