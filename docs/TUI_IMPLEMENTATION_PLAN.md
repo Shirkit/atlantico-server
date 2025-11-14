@@ -37,20 +37,37 @@ Transform the atlantico-server from a CLI-based application to a modern Terminal
 
 ## TUI Architecture
 
+### Container Approach (Implemented)
+
+**Architecture Pattern:** Single-screen application with content swapping
+
+The application uses a **container approach** where:
+- One main `ServerApp` instance runs throughout the session
+- Header and Footer remain visible at all times
+- Content area uses `ContentSwitcher` to swap between different views
+- All views (Dashboard, Devices, Federated, Logs, Settings) are widgets, not screens
+- Navigation is instant - just switches which view is visible
+
+**Benefits:**
+- Persistent header/footer navigation
+- Faster view switching (no screen push/pop)
+- Shared state easier to manage
+- More traditional desktop-app feel
+
 ### Application Structure
 ```
 atlantico_server/
 ├── server.py              # Existing server logic (keep as is)
 ├── tui/
 │   ├── __init__.py
-│   ├── app.py            # Main Textual app
-│   ├── screens/
+│   ├── app.py            # Main Textual app with ContentSwitcher
+│   ├── screens/          # Note: "screens" folder contains Views now
 │   │   ├── __init__.py
-│   │   ├── dashboard.py  # Main dashboard screen
-│   │   ├── devices.py    # Device monitoring screen
-│   │   ├── federated.py  # Federated learning control screen
-│   │   ├── logs.py       # Logs viewer screen
-│   │   └── settings.py   # Configuration screen
+│   │   ├── dashboard.py  # DashboardView - main view
+│   │   ├── devices.py    # DevicesView - device monitoring
+│   │   ├── federated.py  # FederatedView - training control
+│   │   ├── logs.py       # LogsView - logs viewer
+│   │   └── settings.py   # SettingsView - configuration
 │   ├── widgets/
 │   │   ├── __init__.py
 │   │   ├── device_table.py     # Custom device status table
@@ -60,6 +77,28 @@ atlantico_server/
 │   └── styles/
 │       └── main.css      # Textual CSS styling
 └── server_tui.py         # Entry point for TUI mode
+```
+
+**Visual Structure:**
+```
+┌─────────────────────────────────────────────┐
+│ Header (Atlantico Server - always visible) │
+├─────────────────────────────────────────────┤
+│                                             │
+│  ContentSwitcher Area:                      │
+│  - Shows DashboardView (default)            │
+│  - Or DevicesView                           │
+│  - Or FederatedView                         │
+│  - Or LogsView                              │
+│  - Or SettingsView                          │
+│                                             │
+│  (Only one visible at a time)               │
+│                                             │
+├─────────────────────────────────────────────┤
+│ Footer with keybindings (always visible)    │
+│ [d] Dashboard [v] Devices [f] Federate      │
+│ [l] Logs [s] Settings [q] Quit              │
+└─────────────────────────────────────────────┘
 ```
 
 ## Screen Designs
@@ -287,7 +326,8 @@ atlantico_server/
    - Add command line argument to switch between CLI and TUI modes
    - Update `requirements.txt` with textual dependency
 
-**Deliverable:** Running TUI app with empty screens and working navigation
+**Deliverable:** Running TUI app with empty screens and working navigation  
+**Validation:** ✅ User feedback received - Phase 1 complete
 
 ### Phase 2: Dashboard Screen (Tasks 5a)
 **Goal:** Implement main dashboard with server status
@@ -307,11 +347,12 @@ atlantico_server/
    - Add loading/success/error feedback
 
 4. Activity feed
-   - Create event queue for server actions
+    - Create event queue for server actions
    - Display last N events with timestamps
    - Auto-scroll to bottom
 
-**Deliverable:** Functional dashboard showing live server state
+**Deliverable:** Functional dashboard showing live server state  
+**Validation:** ⏳ Awaiting user feedback before proceeding to Phase 3
 
 ### Phase 3: Device Monitor Screen (Tasks 5b)
 **Goal:** Real-time device status monitoring
@@ -336,7 +377,8 @@ atlantico_server/
    - Show loading indicator
    - Update table when responses arrive
 
-**Deliverable:** Live device monitoring with status updates
+**Deliverable:** Live device monitoring with status updates  
+**Validation:** ⏳ Awaiting user feedback before proceeding to Phase 4
 
 ### Phase 4: Federated Learning Screen (Tasks 5c)
 **Goal:** Interactive training control
@@ -361,7 +403,8 @@ atlantico_server/
    - Show round history (simple chart)
    - Calculate deltas from previous round
 
-**Deliverable:** Full training control with live progress
+**Deliverable:** Full training control with live progress  
+**Validation:** ⏳ Awaiting user feedback before proceeding to Phase 5
 
 ### Phase 5: Logs Screen (Tasks 5d)
 **Goal:** Comprehensive log viewing
@@ -386,7 +429,8 @@ atlantico_server/
    - Choose export path
    - Status feedback
 
-**Deliverable:** Complete log viewing experience
+**Deliverable:** Complete log viewing experience  
+**Validation:** ⏳ Awaiting user feedback before proceeding to Phase 6
 
 ### Phase 6: Settings Screen (Tasks 5e)
 **Goal:** Configuration management
@@ -411,7 +455,8 @@ atlantico_server/
    - Reconnect broker if changed
    - Update display preferences immediately
 
-**Deliverable:** Working settings management
+**Deliverable:** Working settings management  
+**Validation:** ⏳ Awaiting user feedback before proceeding to Phase 7
 
 ### Phase 7: Integration and Polish (Task 6)
 **Goal:** Seamless integration with existing server code
@@ -441,7 +486,25 @@ atlantico_server/
    - Test with multiple devices
    - Verify state updates correctly
 
-**Deliverable:** Production-ready TUI application
+**Deliverable:** Production-ready TUI application  
+**Validation:** ⏳ Awaiting final user feedback and acceptance
+
+---
+
+## Validation Process
+
+**Important:** Each phase requires user feedback before proceeding to the next phase. The workflow is:
+
+1. **Implement phase** - Complete all tasks for the current phase
+2. **Present to user** - Show the working implementation
+3. **Get feedback** - User tests and provides feedback
+4. **Iterate if needed** - Make adjustments based on feedback
+5. **Get approval** - User confirms phase is complete
+6. **Move to next phase** - Only proceed after explicit approval
+
+This ensures the TUI meets user expectations at each step and prevents building features that don't align with user needs.
+
+---
 
 ## Technical Details
 
