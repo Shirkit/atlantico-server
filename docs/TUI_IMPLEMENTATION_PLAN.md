@@ -446,8 +446,8 @@ atlantico_server/
 - MetricsPanel: Ready for metric display (future enhancement)
 - Pause Logic: Server-side state management, continues aggregation but holds sending
 
-### Phase 5: Logs Screen (Tasks 5d)
-**Goal:** Comprehensive log viewing
+### Phase 5: Logs Screen & System-wide Logging (Tasks 5d)
+**Goal:** Comprehensive log viewing and unified logging system
 
 1. ✅ Log widget setup
    - ✅ Use RichLog widget (auto-scrolling)
@@ -460,18 +460,28 @@ atlantico_server/
    - ✅ TUI tails log file (no stdout capture)
    - ✅ Thread-safe logging from MQTT callbacks
 
-3. ⏳ Filtering (Future)
+3. ✅ System-wide logging refactoring
+   - ✅ **server.py:** Removed _log() wrapper methods, converted to logger.XXX calls
+   - ✅ **reader.py:** Added logger parameter, removed debug prints
+   - ✅ **parser.py:** Added module logger, converted all print() to logger calls
+   - ✅ **server_tui.py:** Replaced startup print() with logger calls
+   - ✅ **Language:** Converted 200+ Portuguese logs to English
+   - ✅ **Cleanup:** Removed emojis and redundant prefixes from log messages
+   - ✅ **Level optimization:** Adjusted INFO→DEBUG for verbose operations
+   - ✅ **Logger hierarchy:** Fixed module loggers to use proper parent logger
+
+4. ⏳ Filtering (Future)
    - ⏳ Buttons to filter by level
    - ⏳ Search functionality
    - ⏳ Clear logs button
 
-4. ⏳ Export functionality (Future)
+5. ⏳ Export functionality (Future)
    - ✅ Logs already saved to file
    - ⏳ UI for choosing export location
    - ⏳ Copy to different destination
 
-**Deliverable:** ✅ Complete log viewing with file tailing  
-**Validation:** ✅ User confirmed working! Fixed double timestamp and stdout interference issues
+**Deliverable:** ✅ Complete logging system with file tailing and unified codebase  
+**Validation:** ✅ User confirmed working! All modules now use consistent logging
 
 **Key Architecture Decisions:**
 - **File-based logging:** All logs written to run/logs/server.log
@@ -479,6 +489,8 @@ atlantico_server/
 - **TUI tails file:** Logs screen reads file every 0.5s, shows new lines
 - **Dashboard shows last 10:** Activity feed also tails file, displays last 10 lines
 - **Clean separation:** One logging system, multiple display methods
+- **Module-level loggers:** Each module uses `logger = logging.getLogger(__name__)`
+- **Logger hierarchy:** server_tui.py uses `get_logger('atlantico_server')` for proper inheritance
 
 ### Phase 6: Settings Screen (Tasks 5e)
 **Goal:** Configuration management

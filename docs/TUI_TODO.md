@@ -60,6 +60,16 @@
 - ✅ Separate CLI/TUI modes (enable_stdout parameter)
 - ✅ Fixed double timestamp issue
 - ✅ Fixed log pollution in dashboard
+- ✅ System-wide logging refactoring
+  - ✅ Converted 200+ Portuguese logs to English
+  - ✅ Removed self._log() wrapper methods from server.py
+  - ✅ Replaced all self._log() with self.logger.XXX
+  - ✅ Removed emojis and redundant prefixes
+  - ✅ Optimized log levels (DEBUG/INFO/WARNING/ERROR)
+  - ✅ Integrated logger into reader.py (removed debug parameter)
+  - ✅ Converted parser.py print() to logger calls
+  - ✅ Fixed server_tui.py logger hierarchy (uses get_logger)
+  - ✅ Committed: c51fdf3, 3b98eb8, 794b872
 
 ---
 
@@ -142,19 +152,15 @@ Tasks:
 - ✅ Dashboard showing all server logs (disabled stdout in TUI mode)
 - ✅ MQTT logs not appearing (created _log() method with log_capture)
 - ✅ Device monitor state confusion (optimized to 2 dicts with computed properties)
+- ✅ Empty server.log file (fixed logger hierarchy in server_tui.py)
+- ✅ Portuguese logs throughout codebase (converted 200+ to English)
+- ✅ Inconsistent logging patterns (unified to logger.XXX across all modules)
 
 ---
 
 ## Technical Debt 🔧
 
 ### High Priority
-- [x] Remove temporary test FL button from dashboard
-  - ✅ Proper Federated Learning screen implemented with full controls
-  - ⏳ TODO: Remove test button from dashboard (kept for backwards compatibility)
-- [x] Implement Stop button functionality
-  - ✅ Stop button sends unsubscribe command to devices
-  - ✅ Graceful shutdown with proper cleanup
-  - ✅ Multiple checkpoints throughout execution flow
 - [ ] Wire metrics panel to actual training data
   - Structure exists, needs data from aggregation results
   - Calculate accuracy and loss from device models
@@ -165,6 +171,9 @@ Tasks:
 - [ ] Add proper error handling in device monitor
   - Handle missing device data gracefully
   - Show error states in table
+- [ ] Consider removing test FL button from dashboard
+  - Proper Federated Learning screen implemented with full controls
+  - Kept for backwards compatibility and quick testing
 
 ### Medium Priority
 - [ ] Implement log filtering in Logs view
@@ -246,6 +255,7 @@ Tasks:
 - ✅ User confirmed Phase 3 working after optimization
 - ✅ User confirmed logging working: "Nice, much much better"
 - ✅ Phase 4 implementation complete: Pause/resume functionality working
+- ✅ Phase 5 system-wide logging refactoring: "It's working"
 
 ---
 
@@ -285,4 +295,9 @@ atlantico-server/
 ---
 
 **Last Updated:** November 14, 2025  
-**Current Phase:** Phases 1-5 complete + Stop functionality, ready for Phase 6 (Settings Screen)
+**Current Phase:** Phases 1-5 complete (including system-wide logging refactoring), ready for Phase 6 (Settings Screen)
+
+### Recent Commits
+- `c51fdf3` - refactor(server): modernize logging system and remove CLI menu
+- `3b98eb8` - refactor(parser): convert print statements to logger calls
+- `794b872` - refactor(tui): replace print statements with logger in server_tui.py
