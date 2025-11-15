@@ -42,17 +42,17 @@ def do_parse(parse_folder, metrics_folder):
     found_files = _find_json_files(parse_folder)
     
     if not found_files:
-        print("Nenhum arquivo JSON encontrado na pasta de parse.")
+        print("No JSON files found in parse folder.")
         return
 
     print(f"Found {len(found_files)} JSON files")
 
     json_data = _load_json_data(found_files)
     if not json_data:
-        print("Nenhum dado válido foi carregado.")
+        print("No valid data was loaded.")
         return
 
-    print("Dados parseados com sucesso.")
+    print("Data parsed successfully.")
     if metrics_folder and not os.path.exists(metrics_folder):
         os.makedirs(metrics_folder)
     
@@ -486,7 +486,7 @@ def _plot_time_breakdown_charts(time_data, clients, rounds, metrics_folder):
         
         for i, client in enumerate(clients):
             plt.plot(rounds, time_data[time_type][i], 'o-', linewidth=STANDARD_LINEWIDTH, 
-                    label=f"Cliente {client}", color=colors[i])
+                    label=f"Client {client}", color=colors[i])
         
         plt.title(title, fontsize=TITLE_FONTSIZE, fontweight=TITLE_FONTWEIGHT, pad=TITLE_PAD)
         plt.ylabel('Tempo (segundos)', fontsize=AXIS_LABEL_FONTSIZE)

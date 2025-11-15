@@ -2,8 +2,10 @@
 
 import struct
 import numpy as np
+import logging
+import traceback
 
-def read_nn_binary_with_activation(filepath, debug=False):
+def read_nn_binary_with_activation(filepath, logger=None):
     """
     Read ESP32 neural network binary file with activation function support
     This reader can handle both formats:
@@ -12,14 +14,16 @@ def read_nn_binary_with_activation(filepath, debug=False):
     
     Args:
         filepath: Path to the neural network binary file
-        debug: If True, prints detailed debug information during parsing
+        logger: Optional logger instance (defaults to module logger)
     """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
     try:
         with open(filepath, 'rb') as f:
             data = f.read()
         
-        if debug:
-            print(f"Reading {filepath} ({len(data)} bytes)")
+        logger.debug(f"Reading {filepath} ({len(data)} bytes)")
         offset = 0
         
         # Read number of layers
@@ -27,14 +31,12 @@ def read_nn_binary_with_activation(filepath, debug=False):
             raise ValueError("File too short for layer count")
         num_layers = struct.unpack('<I', data[offset:offset+4])[0]
         offset += 4
-        if debug:
-            print(f"Number of layers: {num_layers}")
+        logger.debug(f"Number of layers: {num_layers}")
         
         layers = []
         
         for layer_idx in range(num_layers):
-            if debug:
-                print(f"\n--- Layer {layer_idx} ---")
+            logger.debug(f"\n--- Layer {layer_idx} ---")
             
             # Try to detect if activation function byte is present
             # We'll use heuristics: reasonable activation value (0-6) and sensible layer dimensions
@@ -56,8 +58,7 @@ def read_nn_binary_with_activation(filepath, debug=False):
                             if (1 <= inputs <= 1000) and (1 <= outputs <= 1000):
                                 activation_byte = potential_activation
                                 offset += 1
-                                if debug:
-                                    print(f"  Detected activation function: {activation_byte}")
+                                logger.debug(f"  Detected activation function: {activation_byte}")
                         except:
                             pass
             
@@ -69,8 +70,7 @@ def read_nn_binary_with_activation(filepath, debug=False):
             outputs = struct.unpack('<I', data[offset+4:offset+8])[0]
             offset += 8
             
-            if debug:
-                print(f"  Dimensions: {inputs} -> {outputs}")
+            logger.debug(f"  Dimensions: {inputs} -> {outputs}")
             
             # Validate dimensions
             #if inputs > 1000 or outputs > 1000:
@@ -94,24 +94,20 @@ def read_nn_binary_with_activation(filepath, debug=False):
                             if (1 <= test_inputs <= 100) and (1 <= test_outputs <= 100):
                                 # This looks like a valid next layer with activation byte
                                 available_bytes = expected_data_bytes
-                                if debug:
-                                    print(f"  Next layer found at {next_layer_start} (with activation)")
+                                logger.debug(f"  Next layer found at {next_layer_start} (with activation)")
                             else:
                                 # No activation byte, try direct layer dimensions
                                 test_inputs = struct.unpack('<I', data[next_layer_start:next_layer_start+4])[0]
                                 test_outputs = struct.unpack('<I', data[next_layer_start+4:next_layer_start+8])[0]
                                 if (1 <= test_inputs <= 100) and (1 <= test_outputs <= 100):
                                     available_bytes = expected_data_bytes
-                                    if debug:
-                                        print(f"  Next layer found at {next_layer_start} (no activation)")
+                                    logger.debug(f"  Next layer found at {next_layer_start} (no activation)")
                                 else:
                                     available_bytes = len(data) - offset
-                                    if debug:
-                                        print(f"  Could not verify next layer, using remaining data")
+                                    logger.debug(f"  Could not verify next layer, using remaining data")
                         except:
                             available_bytes = len(data) - offset
-                            if debug:
-                                print(f"  Error checking next layer, using remaining data")
+                            logger.debug(f"  Error checking next layer, using remaining data")
                     else:
                         # No activation byte, check direct layer dimensions
                         try:
@@ -119,37 +115,31 @@ def read_nn_binary_with_activation(filepath, debug=False):
                             test_outputs = struct.unpack('<I', data[next_layer_start+4:next_layer_start+8])[0]
                             if (1 <= test_inputs <= 100) and (1 <= test_outputs <= 100):
                                 available_bytes = expected_data_bytes
-                                if debug:
-                                    print(f"  Next layer found at {next_layer_start} (no activation)")
+                                logger.debug(f"  Next layer found at {next_layer_start} (no activation)")
                             else:
                                 available_bytes = len(data) - offset
-                                if debug:
-                                    print(f"  Could not verify next layer, using remaining data")
+                                logger.debug(f"  Could not verify next layer, using remaining data")
                         except:
                             available_bytes = len(data) - offset
-                            if debug:
-                                print(f"  Error checking next layer, using remaining data")
+                            logger.debug(f"  Error checking next layer, using remaining data")
                 else:
                     # Not enough data for next layer header
                     available_bytes = len(data) - offset
-                    if debug:
-                        print(f"  Using remaining data (not enough for next layer header)")
+                    logger.debug(f"  Using remaining data (not enough for next layer header)")
             else:
                 # Last layer, use remaining bytes
                 available_bytes = len(data) - offset
             
             available_floats = available_bytes // 4
-            if debug:
-                print(f"  Available data: {available_bytes} bytes = {available_floats} floats")
+            logger.debug(f"  Available data: {available_bytes} bytes = {available_floats} floats")
             
             # Calculate what we can read
             values_per_output = 1 + inputs  # 1 bias + inputs weights
             actual_outputs = available_floats // values_per_output
             
-            if debug:
-                print(f"  Expected: {outputs} outputs × {values_per_output} values = {outputs * values_per_output} floats")
-                print(f"  Available: {available_floats} floats")
-                print(f"  Can read: {actual_outputs} complete outputs")
+            logger.debug(f"  Expected: {outputs} outputs × {values_per_output} values = {outputs * values_per_output} floats")
+            logger.debug(f"  Available: {available_floats} floats")
+            logger.debug(f"  Can read: {actual_outputs} complete outputs")
             
             # Initialize arrays
             weights = np.zeros((outputs, inputs), dtype=np.float32)
@@ -165,8 +155,7 @@ def read_nn_binary_with_activation(filepath, debug=False):
                 
                 # Early NaN detection for bias
                 if np.isnan(bias_value):
-                    if debug:
-                        print(f"ERROR: NaN detected in bias for layer {layer_idx}, output neuron {j}")
+                    logger.error(f"NaN detected in bias for layer {layer_idx}, output neuron {j}")
                     return None
                 
                 biases[j] = bias_value
@@ -180,8 +169,7 @@ def read_nn_binary_with_activation(filepath, debug=False):
                     
                     # Early NaN detection for weight
                     if np.isnan(weight_value):
-                        if debug:
-                            print(f"ERROR: NaN detected in weight for layer {layer_idx}, output neuron {j}, input {k}")
+                        logger.error(f"NaN detected in weight for layer {layer_idx}, output neuron {j}, input {k}")
                         return None
                     
                     weights[j, k] = weight_value
@@ -189,23 +177,20 @@ def read_nn_binary_with_activation(filepath, debug=False):
             
             # For missing outputs, we keep the zero initialization
             if actual_outputs < outputs:
-                if debug:
-                    print(f"  WARNING: Only read {actual_outputs}/{outputs} outputs - remaining initialized to zero")
+                logger.debug(f"  WARNING: Only read {actual_outputs}/{outputs} outputs - remaining initialized to zero")
             
             # Additional comprehensive NaN check for the entire layer
             if np.any(np.isnan(weights)) or np.any(np.isnan(biases)):
-                if debug:
-                    print(f"ERROR: NaN values detected in layer {layer_idx} after reading all data")
-                    print(f"  NaN in weights: {np.any(np.isnan(weights))}")
-                    print(f"  NaN in biases: {np.any(np.isnan(biases))}")
+                logger.error(f"NaN values detected in layer {layer_idx} after reading all data")
+                logger.error(f"  NaN in weights: {np.any(np.isnan(weights))}")
+                logger.error(f"  NaN in biases: {np.any(np.isnan(biases))}")
                 return None
             
-            if debug:
-                print(f"  Weights shape: {weights.shape}")
-                print(f"  Weights range: {weights.min():.4f} to {weights.max():.4f}")
-                print(f"  Biases shape: {biases.shape}")
-                print(f"  Biases range: {biases.min():.4f} to {biases.max():.4f}")
-                print(f"  Layer data ended at offset: {offset}")
+            logger.debug(f"  Weights shape: {weights.shape}")
+            logger.debug(f"  Weights range: {weights.min():.4f} to {weights.max():.4f}")
+            logger.debug(f"  Biases shape: {biases.shape}")
+            logger.debug(f"  Biases range: {biases.min():.4f} to {biases.max():.4f}")
+            logger.debug(f"  Layer data ended at offset: {offset}")
             
             # Map activation byte to string
             activation_names = {
@@ -229,13 +214,12 @@ def read_nn_binary_with_activation(filepath, debug=False):
                 'activation_byte': activation_byte
             })
                 
-        if debug:
-            print(f"\nTotal bytes read: {offset}/{len(data)}")
-            
-            if offset != len(data):
-                print(f"WARNING: {len(data) - offset} bytes remaining in file")
-            else:
-                print("✅ File read completely!")
+        logger.debug(f"\nTotal bytes read: {offset}/{len(data)}")
+        
+        if offset != len(data):
+            logger.debug(f"WARNING: {len(data) - offset} bytes remaining in file")
+        else:
+            logger.debug("File read completely!")
         
         return {
             'layers': layers,
@@ -243,9 +227,8 @@ def read_nn_binary_with_activation(filepath, debug=False):
         }
         
     except Exception as e:
-        print(f"Error reading neural network file: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Reading neural network file: {e}")
+        logger.debug(traceback.format_exc())
         return None
 
 if __name__ == "__main__":

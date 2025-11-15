@@ -311,7 +311,7 @@ class FederatedView(Vertical):
         # Request graceful stop
         if self.server.stop_federated_learning():
             # Button states will be updated by the training thread when it finishes
-            self._log_message("🛑 Stop solicitado - aguardando conclusão da rodada atual...")
+            self._log_message("🛑 Stop requested - waiting for current round to complete...")
     
     def _log_message(self, message: str):
         """Helper to log messages (if logger available)"""

@@ -113,16 +113,6 @@ class MQTTFederatedServer:
         # Setup logging (file always, stdout optional)
         self.logger = setup_logging(debug=debug, enable_stdout=enable_stdout)
         
-        # Convenience methods for different log levels
-        self._log_debug = self.logger.debug
-        self._log_info = self.logger.info
-        self._log_warning = self.logger.warning
-        self._log_error = self.logger.error
-        self._log_critical = self.logger.critical
-        
-        # Keep _log as alias to info for backward compatibility
-        self._log = self.logger.info
-        
     def _setup_mqtt_client(self):
         """Configure MQTT client"""
         self.client.on_connect = self._on_connect
@@ -132,7 +122,7 @@ class MQTTFederatedServer:
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback"""
         if rc != 0:
-            self._log(f"Falha na conexão MQTT. Código de erro: {rc}")
+            self.logger.error(f"MQTT connection failed with code: {rc}")
             
     def _on_message(self, client, userdata, message):
         """MQTT message callback"""
@@ -140,28 +130,28 @@ class MQTTFederatedServer:
             topic = message.topic
             topic_parts = topic.split('/')
             if self.debug:
-                self._log(f"Mensagem recebida no tópico: {topic}")
+                self.logger.debug(f"Message received on topic: {topic}")
             
             if topic_parts[2] == "model" and topic_parts[3] == "rawpush":
                 if self.debug:
-                    self._log('Recebendo arquivo de rede neural...')
+                    self.logger.debug('Receiving neural network file')
                 self._handle_raw_push_message(topic_parts, message.payload)
             elif topic_parts[2] == "model" and topic_parts[3] == "push":
                 if self.debug:
-                    self._log('Recebendo mensagem de modelo...')
+                    self.logger.debug('Receiving model message')
                 self._handle_model_message(message.payload.decode("utf-8"))
             elif topic_parts[2] == "commands":
                 self._handle_command_message(message.payload.decode("utf-8"))
                 
         except UnicodeDecodeError as e:
-            self._log(f"Erro ao decodificar mensagem: {e}")
-            self._log(f"Payload: {message.payload}")
+            self.logger.error(f"Decoding message: {e}")
+            self.logger.error(f"Payload: {message.payload}")
         except json.JSONDecodeError as e:
-            self._log(f"Erro ao decodificar JSON: {e}")
-            self._log(f"Payload: {message.payload}")
+            self.logger.error(f"Decoding JSON: {e}")
+            self.logger.error(f"Payload: {message.payload}")
         except Exception as e:
-            self._log(f"Erro inesperado ao processar mensagem: {e}")
-            self._log(traceback.format_exc())
+            self.logger.error(f"Unexpected error processing message: {e}")
+            self.logger.error(traceback.format_exc())
     
     def _handle_raw_push_message(self, topic_parts, payload):
         """Handle raw neural network file uploads"""
@@ -200,7 +190,7 @@ class MQTTFederatedServer:
             client_id = command_data.get("client")
             
             if not command:
-                self._log("⚠️ Comando não especificado na mensagem")
+                self.logger.warning("Command not specified in message")
                 return
                 
             if self.state.is_federated:
@@ -208,10 +198,10 @@ class MQTTFederatedServer:
             elif command == "alive":
                 self._handle_alive_command(client_id)
             else:
-                self._log(f"⚠️ Comando não reconhecido: {payload}")
+                self.logger.warning(f"Unrecognized command: {payload}")
                 
         except json.JSONDecodeError as e:
-            self._log(f"❌ Erro ao processar comando: {e}")
+            self.logger.error(f"Processing command: {e}")
     
     def _handle_federated_command(self, command, client_id, command_data):
         """Handle federated learning specific commands"""
@@ -230,19 +220,19 @@ class MQTTFederatedServer:
         """Handle client join requests"""
         if client_id not in self.state.connected_clients:
             self.state.connected_clients[client_id] = {'last_seen': time.time()}
-            self._log(f"Cliente {client_id} se juntou ao servidor. "
-                      f"Total de clientes: {len(self.state.connected_clients)}")
+            self.logger.info(f"Client {client_id} joined the server. "
+                      f"Total clients: {len(self.state.connected_clients)}")
     
     def _handle_leave_command(self, client_id):
         """Handle client leave notifications"""
         if client_id in self.state.connected_clients:
             del self.state.connected_clients[client_id]
-            self._log(f"Cliente {client_id} saiu do servidor.")
+            self.logger.info(f"Client {client_id} left the server")
     
     def _handle_resume_command(self, client_id):
         """Handle client resume notifications"""
         if client_id in self.state.connected_clients:
-            self._log(f"Cliente {client_id} está pronto para continuar.")
+            self.logger.info(f"Client {client_id} is ready to continue")
             try:
                 resume_command = {
                     "command": "federate_resume",
@@ -259,7 +249,7 @@ class MQTTFederatedServer:
                 )
                 
                 if os.path.exists(aggregated_binary_path):
-                    self._log(f"Enviando arquivo binário de retomada para {client_id}")
+                    self.logger.debug(f"Sending binary resume file to {client_id}")
                     self._send_binary_file(aggregated_binary_path, f"{TOPIC_RESUME_TO_DEVICES_RAW}/{client_id}")
                 else:
                     # Fallback to JSON if binary file doesn't exist
@@ -268,11 +258,11 @@ class MQTTFederatedServer:
                         str(self.state.current_round - 1),
                         "aggregated_weights.json"
                     )
-                    self._log(f"⚠️ Arquivo binário não encontrado, enviando JSON para {client_id}")
+                    self.logger.debug(f"Binary file not found, sending JSON to {client_id}")
                     self._send_file(aggregated_json_path, TOPIC_RESUME_TO_DEVICES)
                 
             except Exception as e:
-                self._log(f"❌ Erro ao enviar arquivo de pesos: {e}")
+                self.logger.error(f"Sending weights file: {e}")
     
     def _handle_alive_command(self, client_id, auto_discover=True):
         """Handle alive messages"""
@@ -317,22 +307,22 @@ class MQTTFederatedServer:
                 with open(filepath, 'x') as json_file:
                     json.dump(output_data, json_file, indent=4, separators=(',', ':'))
             except FileExistsError:
-                self._log(f"⚠️ Arquivo JSON já existe: {filepath} Ignorando...")
+                self.logger.debug(f"JSON file already exists: {filepath}, ignoring")
                 # File already exists, probably received twice - ignore
                 pass
                 
         except json.JSONDecodeError as e:
-            self._log(f"❌ Erro ao decodificar JSON: {e}")
-            self._log(f"Dados recebidos: {data}")
+            self.logger.error(f"Decoding JSON: {e}")
+            self.logger.error(f"Received data: {data}")
     
     def _send_command(self, command_data, topic=TOPIC_SEND_COMMANDS_TO_DEVICES):
         """Send command via MQTT"""
         try:
             if self.debug:
-                self._log("📤 Enviando comando via MQTT...")
+                self.logger.debug("Sending command via MQTT")
             self.client.publish(topic, command_data)
         except Exception as e:
-            self._log(f"❌ Erro ao enviar comando via MQTT: {e}")
+            self.logger.error(f"Sending command via MQTT: {e}")
     
     def _send_file(self, filepath, topic=TOPIC_SEND_TO_DEVICES):
         """Send file content via MQTT"""
@@ -342,15 +332,15 @@ class MQTTFederatedServer:
                     content = file.read().strip()
                     self.client.publish(topic, content)
             else:
-                self._log(f"❌ Arquivo {filepath} não encontrado")
+                self.logger.error(f"File {filepath} not found")
         except Exception as e:
-            self._log(f"❌ Erro ao enviar arquivo via MQTT: {e}")
+            self.logger.error(f"Sending file via MQTT: {e}")
     
     def _read_binary_nn_file(self, filepath):
-        """Lê arquivo binário .nn com formato ESP32"""
+        """Read binary .nn file with ESP32 format"""
         try:
             # Use the reader with activation function support
-            network = read_nn_binary_with_activation(filepath)
+            network = read_nn_binary_with_activation(filepath, logger=self.logger)
             
             if network is not None:
                 # Convert to the format expected by the aggregation code
@@ -371,11 +361,11 @@ class MQTTFederatedServer:
                 
                 return network_data
             else:
-                self._log(f"❌ Falha ao carregar rede neural de {filepath}")
+                self.logger.error(f"Failed to load neural network from {filepath}")
                 return None
             
         except Exception as e:
-            self._log(f"❌ Erro ao ler arquivo {filepath}: {e}")
+            self.logger.error(f"Reading file {filepath}: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -419,7 +409,7 @@ class MQTTFederatedServer:
             return True
             
         except Exception as e:
-            self._log(f"❌ Erro ao escrever arquivo binário {filepath}: {e}")
+            self.logger.error(f"Writing binary file {filepath}: {e}")
             return False
     
     def _send_binary_file(self, filepath, topic=TOPIC_SEND_TO_DEVICES_RAW):
@@ -428,12 +418,12 @@ class MQTTFederatedServer:
             if os.path.exists(filepath):
                 with open(filepath, "rb") as file:
                     content = file.read()
-                    self._log(f"📤 Enviando arquivo binário ({len(content)/1024:.1f} KB)")
+                    self.logger.debug(f"Sending binary file ({len(content)/1024:.1f} KB)")
                     self.client.publish(topic, content)
             else:
-                self._log(f"❌ Arquivo binário {filepath} não encontrado")
+                self.logger.error(f"Binary file {filepath} not found")
         except Exception as e:
-            self._log(f"❌ Erro ao enviar arquivo binário via MQTT: {e}")
+            self.logger.error(f"Sending binary file via MQTT: {e}")
 
     def aggregate_weights(self, round_number=-1):
         """Aggregate neural network weights from multiple clients using binary .nn files with JSON fallback"""
@@ -451,19 +441,19 @@ class MQTTFederatedServer:
             return self._aggregate_weights_binary(source_dir, nn_files, round_number)
         else:
             # FALLBACK METHOD: Use JSON files if no .nn files found
-            self._log("⚠️ Nenhum arquivo .nn encontrado, tentando método JSON fallback...")
+            self.logger.warning("No .nn files found, trying JSON fallback method")
             json_files = [f for f in files if f.endswith('.json') and f != "aggregated_weights.json"]
             
             if json_files:
-                self._log(f"📊 Usando método JSON fallback: {len(json_files)} arquivos JSON encontrados")
+                self.logger.debug(f"Using JSON fallback method: {len(json_files)} JSON files found")
                 return self._aggregate_weights_json(source_dir, json_files, round_number)
             else:
-                self._log("❌ Nenhum arquivo .nn ou .json encontrado para agregação")
+                self.logger.error("No .nn or .json files found for aggregation")
                 return None
 
     def _aggregate_weights_binary(self, source_dir, nn_files, round_number):
         """Aggregate using binary .nn files (primary method)"""
-        self._log(f"🔄 Agregando {len(nn_files)} modelos binários (rodada {round_number})...")
+        self.logger.info(f"Aggregating {len(nn_files)} binary models (round {round_number})")
         
         # Read binary neural network data
         networks = []
@@ -474,14 +464,14 @@ class MQTTFederatedServer:
                 networks.append(network_data)
                  
         if not networks:
-            self._log("❌ Nenhum dado válido para agregação binária.")
+            self.logger.error("No valid data for binary aggregation")
             return None
 
         # Verify all networks have the same structure
         first_network = networks[0]
         for i, network in enumerate(networks[1:], 1):
             if network['numberOflayers'] != first_network['numberOflayers']:
-                self._log(f"❌ Erro: Número de camadas diferente no arquivo {nn_files[i]}")
+                self.logger.error(f"Different number of layers in file {nn_files[i]}")
                 return None
             
             for layer_idx in range(network['numberOflayers']):
@@ -490,7 +480,7 @@ class MQTTFederatedServer:
                 
                 if (first_layer['inputs'] != curr_layer['inputs'] or
                     first_layer['outputs'] != curr_layer['outputs']):
-                    self._log(f"❌ Erro: Estrutura de camada diferente no arquivo {nn_files[i]}")
+                    self.logger.error(f"Different layer structure in file {nn_files[i]}")
                     return None
         
         # Create aggregated network structure
@@ -523,7 +513,7 @@ class MQTTFederatedServer:
             
             aggregated_network['layers'].append(aggregated_layer)
             if self.debug:
-                self._log(f"   Camada {layer_idx}: {aggregated_layer['inputs']} → {aggregated_layer['outputs']}")
+                self.logger.debug(f"Layer {layer_idx}: {aggregated_layer['inputs']} → {aggregated_layer['outputs']}")
         
         # Save aggregated network as binary file
         if self.state.is_federated:
@@ -539,7 +529,7 @@ class MQTTFederatedServer:
         success = self._write_binary_nn_file(output_path, aggregated_network)
         
         if success:
-            self._log(f"✅ Agregados {len(networks)} modelos válidos")
+            self.logger.info(f"Aggregated {len(networks)} valid models")
             
             # Also save as JSON for compatibility/debugging with parser.py
             json_output_path = output_path.replace('.nn', '.json')
@@ -570,7 +560,7 @@ class MQTTFederatedServer:
             
             return output_path
         else:
-            self._log("❌ Falha ao salvar pesos agregados")
+            self.logger.error("Failed to save aggregated weights")
             return None
 
     def _aggregate_weights_json(self, source_dir, json_files, round_number):
@@ -594,7 +584,7 @@ class MQTTFederatedServer:
             aggregated["round"] = round_number
         
         if not json_data:
-            self._log("❌ Nenhum dado válido para agregação JSON")
+            self.logger.error("No valid data for JSON aggregation")
             return None
         
         # Get dimensions from first valid entry
@@ -611,10 +601,10 @@ class MQTTFederatedServer:
         
         valid_count = len(json_data) - len(skip_indices)
         if valid_count == 0:
-            self._log("❌ Nenhum dado válido encontrado para agregação JSON")
+            self.logger.error("No valid data found for JSON aggregation")
             return None
         
-        self._log(f"🔄 Agregando {valid_count} modelos válidos (método JSON fallback)...")
+        self.logger.info(f"Aggregating {valid_count} valid models (JSON fallback method)")
         
         # Aggregate biases
         for i in range(bias_length):
@@ -645,13 +635,13 @@ class MQTTFederatedServer:
         with open(output_path, 'w') as f:
             json.dump(aggregated, f, indent=4, separators=(',', ':'))
         
-        self._log(f"💾 Pesos agregados salvos em: {output_path}")
-        self._log(f"✅ Agregados {valid_count} modelos válidos de {len(json_data)} total (método JSON)")
+        self.logger.info(f"Aggregated weights saved to: {output_path}")
+        self.logger.info(f"Aggregated {valid_count} valid models from {len(json_data)} total (JSON method)")
         return output_path
     
     def start_federated_learning(self, max_rounds=None, expected_clients=None):
         """Start federated learning process"""
-        self._log("🚀 Iniciando Federated Learning...")
+        self.logger.info("Starting Federated Learning")
         
         # Setup MQTT subscriptions
         topics = [
@@ -667,14 +657,14 @@ class MQTTFederatedServer:
             if max_rounds is not None:
                 max_rounds = max_rounds
             else:
-                max_rounds = int(input("\nDigite o número de rodadas para o processo federativo: "))
+                max_rounds = int(input("\nEnter the number of rounds for the federated process: "))
             
             if expected_clients is not None:
                 expected_clients = expected_clients
             else:
-                expected_clients = int(input("Digite o número de clientes esperados: "))
+                expected_clients = int(input("Enter the expected number of clients: "))
         except ValueError:
-            self._log("Entrada inválida. Encerrando...")
+            self.logger.error("Invalid input. Exiting")
             return
         
         # Create default test configuration
@@ -690,7 +680,7 @@ class MQTTFederatedServer:
             "sendJsonWeights": DEFAULT_SEND_JSON_WEIGHTS
         }
         
-        self._log(f"Configuração: {max_rounds} rodadas, {expected_clients} clientes esperados")
+        self.logger.info(f"Configuration: {max_rounds} rounds, {expected_clients} clients expected")
         
         # Run single federated learning session using shared code
         success = self._run_single_batch_test(test_config, 1, expected_clients, None)
@@ -698,9 +688,9 @@ class MQTTFederatedServer:
         if success:
             # Use the shared finalization
             self._finalize_single_batch_test()
-            self._log("✅ Federated learning concluído com sucesso.")
+            self.logger.info("Federated learning completed successfully.")
         else:
-            self._log("❌ Federated learning falhou.")
+            self.logger.error("Federated learning failed.")
         
         # Cleanup
         self._cleanup_federated_learning()
@@ -744,48 +734,48 @@ class MQTTFederatedServer:
     def pause_federated_learning(self):
         """Pause federated learning - continue aggregation but don't send weights"""
         if not self.state.is_federated:
-            self._log("❌ Federated learning não está ativo")
+            self.logger.error("Federated learning is not active")
             return False
         
         if self.state.is_paused:
-            self._log("⚠️  Federated learning já está pausado")
+            self.logger.warning("Federated learning is already paused")
             return False
         
         self.state.is_paused = True
-        self._log("⏸️  Federated learning pausado")
+        self.logger.info("Federated learning paused")
         return True
     
     def resume_federated_learning(self):
         """Resume federated learning - send accumulated weights"""
         if not self.state.is_federated:
-            self._log("❌ Federated learning não está ativo")
+            self.logger.error("Federated learning is not active")
             return False
         
         if not self.state.is_paused:
-            self._log("⚠️  Federated learning não está pausado")
+            self.logger.warning("Federated learning is not paused")
             return False
         
         self.state.is_paused = False
-        self._log("▶️  Federated learning retomado")
+        self.logger.info("Federated learning resumed")
         return True
     
     def stop_federated_learning(self):
         """Request graceful stop of federated learning"""
         if not self.state.is_federated:
-            self._log("❌ Federated learning não está ativo")
+            self.logger.error("Federated learning is not active")
             return False
         
         if self.state.stop_requested:
-            self._log("⚠️  Stop já foi solicitado")
+            self.logger.warning("Stop already requested")
             return False
         
         self.state.stop_requested = True
-        self._log("🛑 Solicitando parada graceful do federated learning...")
+        self.logger.info("Requesting graceful stop of federated learning")
         return True
     
     def start_listening_mode(self):
         """Start listening mode - just receive and save messages"""
-        self._log("👂 Iniciando modo de escuta...")
+        self.logger.info("Starting listening mode")
         self.client.loop_stop()
         
         topics = [
@@ -795,14 +785,14 @@ class MQTTFederatedServer:
         ]
         self.client.subscribe(topics)
         
-        self._log("📡 Escutando mensagens MQTT... Pressione Ctrl+C para sair")
+        self.logger.info("Listening for MQTT messages... Press Ctrl+C to exit")
         self.client.loop_forever()
     
     def request_models_from_devices(self):
         """Request models from all connected devices"""
         request_command = {"command": "request_model"}
         self._send_command(json.dumps(request_command, separators=(',', ':')))
-        self._log("📨 Solicitação de modelos enviada para os dispositivos")
+        self.logger.debug("Model request sent to devices")
     
     def check_alive_devices(self):
         """Check which devices are alive"""
@@ -810,7 +800,7 @@ class MQTTFederatedServer:
         topics = [(TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)]
         self.client.subscribe(topics)
         
-        self._log("💓 Enviando sinal de vida para os dispositivos...")
+        self.logger.debug("Sending alive signal to devices")
         alive_command = {"command": "federate_alive"}
 
         self._send_command(json.dumps(alive_command, separators=(',', ':')))
@@ -842,31 +832,31 @@ class MQTTFederatedServer:
                 if name.endswith('done.json'):
                     folder = os.path.dirname(os.path.join(root, name))
                     metrics = os.path.join(folder, 'metrics/')
-                    self._log(f"📂 Processando pasta: {folder}")
+                    self.logger.debug(f"Processing folder: {folder}")
                     do_parse(folder, metrics)
     
     def disconnect(self):
         """Disconnect MQTT client"""
         self.client.disconnect()
-        self._log("🔌 Cliente MQTT desconectado")
+        self.logger.debug("MQTT client disconnected")
 
     def start_batch_federated_learning(self, batch_config_path, expected_clients=None):
         """Start batch federated learning process from JSON configuration file"""
-        self._log("🚀 Iniciando Batch Federated Learning...")
+        self.logger.info("Starting Batch Federated Learning")
         
         # Load batch configuration
         try:
             with open(batch_config_path, 'r') as f:
                 batch_config = json.load(f)
         except FileNotFoundError:
-            self._log(f"❌ Arquivo de configuração não encontrado: {batch_config_path}")
+            self.logger.error(f"Configuration file not found: {batch_config_path}")
             return
         except json.JSONDecodeError as e:
-            self._log(f"❌ Erro ao decodificar JSON: {e}")
+            self.logger.error(f"Error decoding JSON: {e}")
             return
         
         if not isinstance(batch_config, list):
-            self._log("❌ Configuração deve ser uma lista de objetos de teste")
+            self.logger.error("Configuration must be a list of test objects")
             return
         
         # Create batch-specific folder
@@ -875,7 +865,7 @@ class MQTTFederatedServer:
         batch_base_path = os.path.join(WEIGHTS_FOLDER, batch_folder_name)
         os.makedirs(batch_base_path, exist_ok=True)
         
-        self._log(f"📁 Pasta do lote: {batch_base_path}")
+        self.logger.info(f"Batch folder: {batch_base_path}")
         
         # Setup MQTT subscriptions
         topics = [
@@ -886,20 +876,20 @@ class MQTTFederatedServer:
         self.client.subscribe(topics)
         self.client.loop_start()
         
-        self._log(f"🚀 Iniciando processamento em lote de {len(batch_config)} configurações...")
+        self.logger.info(f"Starting batch processing of {len(batch_config)} configurations")
         
         # Process each test configuration sequentially
         successful_tests = 0
         failed_tests = 0
         
         for test_index, test_config in enumerate(batch_config):
-            self._log(f"\n{'='*60}")
-            self._log(f"INICIANDO TESTE {test_index + 1} de {len(batch_config)}")
-            self._log(f"{'='*60}")
+            self.logger.info(f"\n{'='*60}")
+            self.logger.info(f"STARTING TEST {test_index + 1} of {len(batch_config)}")
+            self.logger.info(f"{'='*60}")
             
             # Validate test configuration
             if not self._validate_test_config(test_config, test_index + 1):
-                self._log(f"❌ Teste {test_index + 1} falhou na validação. Continuando para o próximo teste.")
+                self.logger.error(f"Test {test_index + 1} failed validation. Continuing to next test.")
                 failed_tests += 1
                 continue
             
@@ -907,35 +897,35 @@ class MQTTFederatedServer:
             success = self._run_single_batch_test(test_config, test_index + 1, expected_clients, batch_base_path)
             
             if not success:
-                self._log(f"❌ Teste {test_index + 1} falhou.")
+                self.logger.error(f"Test {test_index + 1} failed.")
                 failed_tests += 1
                 # If stop was requested, break out of batch loop
                 if self.state.stop_requested:
-                    self._log("🛑 Interrompendo processamento em lote devido ao stop")
+                    self.logger.debug("Stopping batch processing due to stop request")
                     break
-                self._log("Continuando para o próximo teste...")
+                self.logger.debug("Continuing to next test")
             else:
-                self._log(f"✅ Teste {test_index + 1} concluído com sucesso.")
+                self.logger.info(f"Test {test_index + 1} completed successfully.")
                 successful_tests += 1
             
             # Wait between tests if not the last one
             if test_index < len(batch_config) - 1:
-                self._log(f"⏳ Aguardando 5 segundos antes do próximo teste...")
+                self.logger.debug("Waiting 5 seconds before next test")
                 # Check for stop during wait
                 for _ in range(5):
                     if self.state.stop_requested:
-                        self._log("🛑 Stop solicitado durante espera entre testes")
+                        self.logger.debug("Stop requested during wait between tests")
                         break
                     sleep(1)
         
-        self._log(f"\n{'='*60}")
-        self._log("PROCESSAMENTO EM LOTE CONCLUÍDO")
-        self._log(f"{'='*60}")
-        self._log(f"📊 Resumo dos testes:")
-        self._log(f"   ✅ Testes bem-sucedidos: {successful_tests}")
-        self._log(f"   ❌ Testes falharam: {failed_tests}")
-        self._log(f"   📁 Total de testes: {len(batch_config)}")
-        self._log(f"   📁 Pasta do lote: {batch_base_path}")
+        self.logger.info(f"\n{'='*60}")
+        self.logger.info("BATCH PROCESSING COMPLETED")
+        self.logger.info(f"{'='*60}")
+        self.logger.info("Test summary:")
+        self.logger.info(f"   Successful tests: {successful_tests}")
+        self.logger.info(f"   Failed tests: {failed_tests}")
+        self.logger.info(f"   Total tests: {len(batch_config)}")
+        self.logger.info(f"   Batch folder: {batch_base_path}")
         
         # Create batch summary file
         batch_summary = {
@@ -967,11 +957,11 @@ class MQTTFederatedServer:
             json.dump(batch_summary, f, indent=4, separators=(',', ':'))
         
         if successful_tests > 0:
-            self._log(f"✅ Processamento em lote concluído com {successful_tests} teste(s) bem-sucedido(s).")
+            self.logger.info(f"Batch processing completed with {successful_tests} successful test(s).")
         else:
-            self._log(f"❌ Nenhum teste foi bem-sucedido.")
+            self.logger.error("No tests were successful.")
         
-        self._log(f"📄 Resumo salvo em: {summary_path}")
+        self.logger.info(f"Summary saved to: {summary_path}")
         
         # Final cleanup
         self._cleanup_federated_learning()
@@ -982,7 +972,7 @@ class MQTTFederatedServer:
         
         for field in required_fields:
             if field not in test_config:
-                self._log(f"❌ Teste {test_number}: Campo obrigatório '{field}' não encontrado")
+                self.logger.error(f"Test {test_number}: Required field '{field}' not found")
                 return False
         
         # Validate layers and activation functions match
@@ -990,28 +980,28 @@ class MQTTFederatedServer:
         activation_funcs = test_config['activationFunctions']
         
         if not isinstance(layers, list) or len(layers) < 2:
-            self._log(f"❌ Teste {test_number}: 'layers' deve ser uma lista com pelo menos 2 elementos")
+            self.logger.error(f"Test {test_number}: 'layers' must be a list with at least 2 elements")
             return False
         
         if not isinstance(activation_funcs, list) or len(activation_funcs) != len(layers) - 1:
-            self._log(f"❌ Teste {test_number}: 'activationFunctions' deve ter {len(layers) - 1} elementos")
+            self.logger.error(f"Test {test_number}: 'activationFunctions' must have {len(layers) - 1} elements")
             return False
         
         # Validate numeric values
         if not isinstance(test_config['epochs'], int) or test_config['epochs'] < 1:
-            self._log(f"❌ Teste {test_number}: 'epochs' deve ser um inteiro positivo")
+            self.logger.error(f"Test {test_number}: 'epochs' must be a positive integer")
             return False
         
         if not isinstance(test_config['learningRateWeights'], (int, float)) or test_config['learningRateWeights'] <= 0:
-            self._log(f"❌ Teste {test_number}: 'learningRateWeights' deve ser um número positivo")
+            self.logger.error(f"Test {test_number}: 'learningRateWeights' must be a positive number")
             return False
         
         if not isinstance(test_config['learningRateBiases'], (int, float)) or test_config['learningRateBiases'] <= 0:
-            self._log(f"❌ Teste {test_number}: 'learningRateBiases' deve ser um número positivo")
+            self.logger.error(f"Test {test_number}: 'learningRateBiases' must be a positive number")
             return False
         
         if not isinstance(test_config['seed'], int):
-            self._log(f"❌ Teste {test_number}: 'seed' deve ser um inteiro")
+            self.logger.error(f"Test {test_number}: 'seed' must be an integer")
             return False
         
         return True
@@ -1036,20 +1026,20 @@ class MQTTFederatedServer:
             # Extract configuration
             max_rounds = test_config.get('rounds', 1)  # Default to 1 round if not specified
             
-            self._log(f"⚙️ Configuração do teste {test_number}: {test_name}")
-            self._log(f"   Épocas: {test_config['epochs']}, Rodadas: {max_rounds}")
-            self._log(f"   Camadas: {test_config['layers']}")
+            self.logger.info(f"⚙️ Test {test_number} configuration: {test_name}")
+            self.logger.info(f"   Epochs: {test_config['epochs']}, Rounds: {max_rounds}")
+            self.logger.info(f"   Layers: {test_config['layers']}")
             if self.debug:
-                self._log(f"   Funções ativação: {test_config['activationFunctions']}")
-                self._log(f"   LR pesos: {test_config['learningRateWeights']}, LR bias: {test_config['learningRateBiases']}")
-                self._log(f"   Seed: {test_config['seed']}, JSON weights: {test_config.get('sendJsonWeights', False)}")
+                self.logger.debug(f"   Activation functions: {test_config['activationFunctions']}")
+                self.logger.debug(f"   LR weights: {test_config['learningRateWeights']}, LR bias: {test_config['learningRateBiases']}")
+                self.logger.debug(f"   Seed: {test_config['seed']}, JSON weights: {test_config.get('sendJsonWeights', False)}")
             
             # Create directories
             os.makedirs(self.state.federated_path, exist_ok=True)
             os.makedirs(os.path.join(self.state.federated_path, str(self.state.current_round)), exist_ok=True)
             
             # Wait for client connections
-            self._log(f"⏳ Aguardando {CONNECTION_WAIT_TIME}s para conexão dos dispositivos...")
+            self.logger.debug(f"Waiting {CONNECTION_WAIT_TIME}s for device connections")
 
             for i in range(COMMAND_RETRIES):
                 unsub_command = {"command": "federate_unsubscribe"}
@@ -1062,15 +1052,15 @@ class MQTTFederatedServer:
                 sleep(COMMAND_RETRY_INTERVAL)
             
             if len(self.state.connected_clients) < 1:
-                self._log(f"❌ Teste {test_number}: Nenhum cliente conectado")
+                self.logger.error(f"Test {test_number}: No clients connected")
                 return False
             
             if expected_clients and len(self.state.connected_clients) < expected_clients:
-                self._log(f"❌ Teste {test_number}: {len(self.state.connected_clients)}/{expected_clients} clientes (insuficiente)")
+                self.logger.error(f"Test {test_number}: {len(self.state.connected_clients)}/{expected_clients} clients (insufficient)")
                 self._send_unsubscribe_command()
                 return False
             
-            self._log(f"✅ Teste {test_number} iniciado com {len(self.state.connected_clients)} clientes")
+            self.logger.info(f"Test {test_number} started with {len(self.state.connected_clients)} clients")
             
             # Create start command with test-specific configuration
             start_command = {
@@ -1118,7 +1108,7 @@ class MQTTFederatedServer:
             return success
             
         except Exception as e:
-            self._log(f"❌ Erro inesperado no teste {test_number}: {e}")
+            self.logger.error(f"Unexpected error in test {test_number}: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1145,17 +1135,17 @@ class MQTTFederatedServer:
             # Check if all clients have submitted their models
             if len(self.state.waiting_for_clients) == 0:
                 if self.state.current_round + 1 > self.state.max_rounds:
-                    self._log(f"✅ Rodada {self.state.current_round}/{self.state.max_rounds} completa - última rodada!")
+                    self.logger.info(f"Round {self.state.current_round}/{self.state.max_rounds} complete - last round!")
                     self.aggregate_weights(self.state.current_round)
                     break
                 
-                self._log(f"✅ Rodada {self.state.current_round}/{self.state.max_rounds} completa - todos os modelos recebidos")
+                self.logger.info(f"Round {self.state.current_round}/{self.state.max_rounds} complete - all models received")
                 sleep(1)
                 
                 # Aggregate weights and send to clients
                 result = self.aggregate_weights(self.state.current_round)
                 if result is None:
-                    self._log("❌ Falha ao agregar pesos para este teste.")
+                    self.logger.error("Failed to aggregate weights for this test.")
                     return False
                 
                 # Send binary aggregated weights to devices (unless paused)
@@ -1167,7 +1157,7 @@ class MQTTFederatedServer:
                 
                 if self.state.is_paused:
                     self.state.paused_aggregated_path = aggregated_binary_path
-                    self._log("⏸️  Treinamento pausado - pesos agregados mas não enviados")
+                    self.logger.info("Training paused - weights aggregated but not sent")
                     # Wait until resumed (or stopped)
                     while self.state.is_paused and not self.state.stop_requested:
                         sleep(0.5)
@@ -1176,7 +1166,7 @@ class MQTTFederatedServer:
                     if self.state.stop_requested:
                         break
                     
-                    self._log("▶️  Treinamento retomado - enviando pesos agregados")
+                    self.logger.info("Training resumed - sending aggregated weights")
                 
                 self._send_binary_file(aggregated_binary_path)
                 sleep(1)
@@ -1192,7 +1182,7 @@ class MQTTFederatedServer:
                     self.state.federated_clients[client_id]['progress'] = 'Training'
                     self.state.federated_clients[client_id]['last_update'] = time.time()
                 
-                self._log(f"📤 Pesos enviados. Iniciando rodada {self.state.current_round}")
+                self.logger.debug(f"Weights sent. Starting round {self.state.current_round}")
                 status_timer = 0
 
             elif status_timer == STATUS_UPDATE_INTERVAL - 5:
@@ -1207,13 +1197,13 @@ class MQTTFederatedServer:
                 alive_count = sum(1 for info in self.state.connected_clients.values() 
                                  if time.time() - info['last_seen'] < 35)
 
-                self._log(f"📊 Status: {received_count}/{total_count} recebidos | Aguardando: {waiting} | Ativos: {alive_count}")
+                self.logger.info(f"Status: {received_count}/{total_count} received | Waiting: {waiting} | Alive: {alive_count}")
                 status_timer = 0
         
         # Check if loop was broken due to stop request
         if self.state.stop_requested:
-            self._log(f"🛑 Stop solicitado - encerrando rodada {self.state.current_round}/{self.state.max_rounds}")
-            self._log("📤 Enviando comando de unsubscribe para os dispositivos...")
+            self.logger.info(f"Stop requested - ending round {self.state.current_round}/{self.state.max_rounds}")
+            self.logger.debug("Sending unsubscribe command to devices")
             self._send_unsubscribe_command()
             sleep(2)  # Give time for devices to receive and process
             return False
@@ -1288,28 +1278,6 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def print_menu():
-    """Print user menu options"""
-    menu_options = [
-        "'send' \tpara agregar os modelos disponíveis e enviar aos dispositivos",
-        "'request' \tpara solicitar modelos dos dispositivos",
-        "'listen' \tpara montar um servidor que apenas escuta mensagens e salva",
-        "'federate' \tpara abrir um servidor federado",
-        "'batch' \tpara executar processamento em lote com configuração JSON",
-        "'parse' \tpara processar os dados e gerar visualizações",
-        "'parseall' \tpara processar todos os dados e gerar todas as visualizações",
-        "'batchcompare' \tpara comparar métricas entre testes de batch",
-        "'alive' \tpara verificar dispositivos ativos",
-        "'unsub' \tpara forçar encerramento do processo federativo nos clientes"
-    ]
-    
-    print("\nOpções disponíveis:")
-    for option in menu_options:
-        print(f" {option}")
-    
-    return input("\nEscreva a opção desejada: ").strip().lower()
-
-
 def main():
     """Main application entry point"""
     # Parse command line arguments
@@ -1322,119 +1290,55 @@ def main():
             server = MQTTFederatedServer(debug=False, enable_stdout=True)
 
             if args.command == 'alive':
-                print("Executando comando 'alive'...")
+                print("Executing 'alive' command")
                 server.check_alive_devices()
                 
             elif args.command == 'federate':
-                print(f"Iniciando servidor federado com {args.rounds} rodadas e {args.clients} clientes esperados...")
+                print(f"Starting federated server with {args.rounds} rounds and {args.clients} expected clients")
                 server.start_federated_learning(max_rounds=args.rounds, expected_clients=args.clients)
                 
             elif args.command == 'batch':
-                print(f"Iniciando processamento em lote usando configuração: {args.config}")
+                print(f"Starting batch processing using configuration: {args.config}")
                 if args.clients:
-                    print(f"Esperando {args.clients} clientes...")
+                    print(f"Expecting {args.clients} clients")
                 server.start_batch_federated_learning(args.config, expected_clients=args.clients)
                 
             elif args.command == 'parse':
-                print("Processando dados de treinamento e gerando visualizações...")
+                print("Processing training data and generating visualizations")
                 if args.folder:
-                    print(f"Usando pasta especificada: {args.folder}")
+                    print(f"Using specified folder: {args.folder}")
                 server.parse_training_data(args.folder)
                 
             elif args.command == 'parseall':
-                print("Processando todos os dados de treinamento e gerando todas as visualizações...")
+                print("Processing all training data and generating all visualizations")
                 if args.folder:
-                    print(f"Buscando dados na pasta: {args.folder}")
+                    print(f"Searching data in folder: {args.folder}")
                 server.parse_all_training_data(args.folder)
                 
             elif args.command == 'batchcompare':
-                print("Comparando métricas entre testes de batch...")
+                print("Comparing metrics between batch tests")
                 batch_folder = args.batch_folder
                 output_folder = args.output if args.output else None
                 
                 plot_batch_comparison(batch_folder, output_folder)
                 if output_folder:
-                    print(f"Comparação concluída! Gráficos salvos em: {output_folder}")
+                    print(f"Comparison complete! Graphs saved to: {output_folder}")
                 else:
-                    print(f"Comparação concluída! Gráficos salvos em: {os.path.join(batch_folder, 'metrics')}")
+                    print(f"Comparison complete! Graphs saved to: {os.path.join(batch_folder, 'metrics')}")
                 
             elif args.command == 'unsub':
-                print("Enviando comando de unsubscribe...")
+                print("Sending unsubscribe command")
                 server._send_unsubscribe_command()
                 sleep(2)  # Give time for the command to be sent
                 
             return  # Exit after executing the command
         
-        # If no command line arguments, use interactive menu
-        print('\33]0;Escolha comando\a', end='', flush=True)
-
-        # CLI mode - enable stdout logging
-        server = MQTTFederatedServer(debug=False, enable_stdout=True)
-
-        server.client.loop_start()
-
-        while True:
-            user_input = print_menu()
-            
-            if user_input == 'send':
-                server.send_aggregated_weights()
-                
-            elif user_input == 'listen':
-                server.start_listening_mode()
-                
-            elif user_input == 'request':
-                server.request_models_from_devices()
-                
-            elif user_input == 'federate':
-                server.start_federated_learning()
-                
-            elif user_input == 'batch':
-                config_path = input("Digite o caminho para o arquivo de configuração JSON: ").strip()
-                try:
-                    clients_input = input("Digite o número de clientes esperados (opcional, pressione Enter para pular): ").strip()
-                    expected_clients = int(clients_input) if clients_input else None
-                except ValueError:
-                    expected_clients = None
-                server.start_batch_federated_learning(config_path, expected_clients)
-                
-            elif user_input == 'parse':
-                folder = input("Digite o caminho da pasta para processar (ou pressione Enter para usar padrão): ").strip()
-                folder = folder if folder else None
-                server.parse_training_data(folder)
-            
-            elif user_input == 'parseall':
-                folder = input("Digite o caminho da pasta base para buscar dados (ou pressione Enter para usar padrão): ").strip()
-                folder = folder if folder else None
-                server.parse_all_training_data(folder)
-                
-            elif user_input == 'batchcompare':
-                batch_folder = input("Digite o caminho da pasta do batch: ").strip()
-                output_folder = input("Digite o caminho de saída (ou pressione Enter para usar padrão batch_folder/metrics/): ").strip()
-                
-                if not output_folder:
-                    output_folder = None
-                
-                print("Comparando métricas entre testes do batch...")
-                plot_batch_comparison(batch_folder, output_folder)
-                if output_folder:
-                    print(f"Comparação concluída! Gráficos salvos em: {output_folder}")
-                else:
-                    print(f"Comparação concluída! Gráficos salvos em: {os.path.join(batch_folder, 'metrics')}")
-                
-            elif user_input == 'unsub':
-                server._send_unsubscribe_command()
-                
-            elif user_input == 'alive':
-                server.check_alive_devices()
-                break
-                
-            else:
-                print("Comando inválido. Tente novamente.")
+        # If no command line arguments, show usage message
+        print("No command provided. Use --help to see available commands.")
+        print("For interactive mode, use the TUI: python server_tui.py")
                 
     except KeyboardInterrupt:
-        print("\nSaindo...")
-    finally:
-        server.disconnect()
+        print("\nExiting")
 
 
 if __name__ == "__main__":
