@@ -8,6 +8,9 @@ import matplotlib.pyplot as plt
 import traceback
 import numpy as np
 import seaborn as sns
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Set matplotlib performance optimizations
 plt.rcParams['figure.max_open_warning'] = 0
@@ -42,17 +45,17 @@ def do_parse(parse_folder, metrics_folder):
     found_files = _find_json_files(parse_folder)
     
     if not found_files:
-        print("No JSON files found in parse folder.")
+        logger.warning("No JSON files found in parse folder")
         return
 
-    print(f"Found {len(found_files)} JSON files")
+    logger.debug(f"Found {len(found_files)} JSON files")
 
     json_data = _load_json_data(found_files)
     if not json_data:
-        print("No valid data was loaded.")
+        logger.warning("No valid data was loaded")
         return
 
-    print("Data parsed successfully.")
+    logger.debug("Data parsed successfully")
     if metrics_folder and not os.path.exists(metrics_folder):
         os.makedirs(metrics_folder)
     
@@ -107,9 +110,9 @@ def _load_json_data(found_files):
                 json_data.append(data)
                 
         except json.JSONDecodeError as e:
-            print(f"Error parsing {file}: {e}")
+            logger.error(f"Error parsing {file}: {e}")
         except KeyError as e:
-            print(f"Missing key in {file}: {e}")
+            logger.error(f"Missing key in {file}: {e}")
     
     return json_data
 
@@ -127,14 +130,14 @@ def _generate_all_plots(json_data, metrics_folder):
             plot_metrics(json_data, metrics_folder, metric)
             plot_clients_heatmap(json_data, metrics_folder, metric)
         except Exception as e:
-            print(f"Error plotting {metric}: {e}")
+            logger.error(f"Error plotting {metric}: {e}")
     
     # Generate per-client plots
     for client_id in set(item["client"] for item in json_data):
         try:
             plot_multiple_metrics(json_data, client_id, metrics_folder, metrics_to_plot)
         except Exception as e:
-            print(f"Error plotting metrics for client {client_id}: {e}")
+            logger.error(f"Error plotting metrics for client {client_id}: {e}")
 
     # Generate performance plots
     performance_plots = [
@@ -154,8 +157,8 @@ def _generate_all_plots(json_data, metrics_folder):
         try:
             plot_func(json_data, metrics_folder)
         except Exception as e:
-            print(f"Error in {plot_func.__name__}: {e}")
-            print(traceback.format_exc())
+            logger.error(f"Error in {plot_func.__name__}: {e}")
+            logger.debug(traceback.format_exc())
 
 
 def plot_metrics(json_data, metrics_folder, metric_name="meanSqrdError"):
@@ -173,7 +176,7 @@ def plot_metrics(json_data, metrics_folder, metric_name="meanSqrdError"):
                 continue
     
     if not client_data:
-        print(f"No data found for metric: {metric_name}")
+        logger.debug(f"No data found for metric: {metric_name}")
         return
     
     # Create plot with standardized size
@@ -198,7 +201,7 @@ def plot_multiple_metrics(json_data, client_id, metrics_folder, metrics):
     client_data = [item for item in json_data if item["client"] == client_id]
     
     if not client_data:
-        print(f"No data found for client: {client_id}")
+        logger.debug(f"No data found for client: {client_id}")
         return
     
     client_data.sort(key=lambda x: x.get("round", 0))
@@ -235,7 +238,7 @@ def plot_clients_heatmap(json_data, metrics_folder, metric="meanSqrdError"):
     rounds = sorted(set(item.get("round", 0) for item in json_data))
     
     if not clients or not rounds:
-        print(f"Insufficient data for heatmap: {len(clients)} clients, {len(rounds)} rounds")
+        logger.debug(f"Insufficient data for heatmap: {len(clients)} clients, {len(rounds)} rounds")
         return
     
     # Create matrix for heatmap
@@ -282,7 +285,7 @@ def plot_training_efficiency_per_epoch(json_data, metrics_folder):
             continue
     
     if not times_per_sample:
-        print("No valid training efficiency data found")
+        logger.debug("No valid training efficiency data found")
         return
     
     plt.figure(figsize=STANDARD_FIGURE_SIZE)
@@ -403,7 +406,7 @@ def plot_training_speed_vs_complexity(json_data, metrics_folder):
             continue
     
     if not model_sizes:
-        print("No valid complexity vs speed data found")
+        logger.debug("No valid complexity vs speed data found")
         return
     
     plt.figure(figsize=STANDARD_FIGURE_SIZE)
@@ -438,7 +441,7 @@ def plot_combined_processing_time_breakdown(json_data, metrics_folder):
     rounds = sorted(set(item.get("round", 0) for item in json_data))
     
     if not clients or not rounds:
-        print("No client or round data found for combined processing time plot")
+        logger.debug("No client or round data found for combined processing time plot")
         return
     
     # Prepare data structures
@@ -521,7 +524,7 @@ def plot_average_timing_metrics(json_data, metrics_folder):
             round_timings[round_num]["construct"].append(timings["previousConstruct"] / 1000)
     
     if not round_timings:
-        print("No timing data found for average timing metrics")
+        logger.debug("No timing data found for average timing metrics")
         return
     
     # Calculate averages for each round
@@ -697,7 +700,7 @@ def plot_training_efficiency(json_data, metrics_folder):
             continue
     
     if not training_times:
-        print("No valid training efficiency data found")
+        logger.debug("No valid training efficiency data found")
         return
     
     plt.figure(figsize=STANDARD_FIGURE_SIZE)
@@ -820,7 +823,7 @@ def plot_fixed_memory_metrics(json_data, metrics_folder):
                 fixed_metrics[metric_name].append(kb_value)
     
     if not fixed_metrics:
-        print("No fixed memory metrics found")
+        logger.debug("No fixed memory metrics found")
         return
     
     _plot_memory_bar_chart(fixed_metrics, clients, metrics_folder, "fixed_memory_metrics.png",
@@ -842,7 +845,7 @@ def plot_round_memory_metrics(json_data, metrics_folder):
                 round_metrics[metric_name][round_num].append(kb_value)
     
     if not round_metrics:
-        print("No round memory metrics found")
+        logger.debug("No round memory metrics found")
         return
     
     _plot_memory_line_chart(round_metrics, sorted(rounds), metrics_folder)
@@ -1023,7 +1026,7 @@ def _save_plot(metrics_folder, filename):
     """Save plot with consistent formatting and close figure."""
     plt.tight_layout()
     plt.savefig(os.path.join(metrics_folder, filename), dpi=STANDARD_DPI, bbox_inches='tight')
-    print(f"Plot saved as {filename}")
+    logger.debug(f"Plot saved as {filename}")
     plt.close()
 
 
@@ -1035,7 +1038,7 @@ def plot_batch_comparison(batch_folder, metrics_folder=None):
         batch_folder: Path to the batch folder containing multiple test subfolders
         metrics_folder: Path where comparison plots will be saved (optional, defaults to batch_folder/metrics/)
     """
-    print(f"Starting batch comparison for folder: {batch_folder}")
+    logger.debug(f"Starting batch comparison for folder: {batch_folder}")
     
     # Set default metrics folder if not provided
     if metrics_folder is None:
@@ -1044,7 +1047,7 @@ def plot_batch_comparison(batch_folder, metrics_folder=None):
     # Create metrics folder if it doesn't exist
     if not os.path.exists(metrics_folder):
         os.makedirs(metrics_folder)
-        print(f"Created metrics folder: {metrics_folder}")
+        logger.debug(f"Created metrics folder: {metrics_folder}")
     
     # Find all test subfolders in the batch folder
     test_folders = []
@@ -1059,17 +1062,17 @@ def plot_batch_comparison(batch_folder, metrics_folder=None):
                     test_folders.append((item, item_path))
     
     if not test_folders:
-        print("No test folders with parse subfolders found in batch folder.")
+        logger.warning("No test folders with parse subfolders found in batch folder")
         return
     
-    print(f"Found {len(test_folders)} test folders")
+    logger.debug(f"Found {len(test_folders)} test folders")
     
     # Load data from all tests
     all_test_data = {}
     metrics_to_plot = ["accuracy", "precision", "f1Score", "recall", "meanSqrdError"]
     
     for test_name, parse_path in test_folders:
-        print(f"Processing test: {test_name}")
+        logger.debug(f"Processing test: {test_name}")
         found_files = _find_json_files(parse_path)
         if found_files:
             json_data = _load_json_data(found_files)
@@ -1079,7 +1082,7 @@ def plot_batch_comparison(batch_folder, metrics_folder=None):
                 all_test_data[test_name] = test_averages
     
     if not all_test_data:
-        print("No valid data found in any test folder.")
+        logger.warning("No valid data found in any test folder")
         return
     
     # Create comparison plots
@@ -1212,7 +1215,7 @@ def _plot_batch_combined_comparison(all_test_data, metrics_folder, metrics_to_pl
     plt.tight_layout()
     plt.savefig(os.path.join(metrics_folder, "batch_comparison_combined.png"), 
                 dpi=STANDARD_DPI, bbox_inches='tight')
-    print("Plot saved as batch_comparison_combined.png")
+    logger.debug("Plot saved as batch_comparison_combined.png")
     plt.close()
 
 
@@ -1229,7 +1232,7 @@ def _plot_batch_gradient_explosions(test_folders, metrics_folder):
     
     # Process each test to count gradient explosions per round
     for test_name, test_path in test_folders:
-        print(f"Processing gradient explosions for test: {test_name}")
+        logger.debug(f"Processing gradient explosions for test: {test_name}")
         found_files = _find_json_files(test_path)
         if found_files:
             json_data = _load_json_data(found_files)
@@ -1248,7 +1251,7 @@ def _plot_batch_gradient_explosions(test_folders, metrics_folder):
                 explosion_data[test_name] = round_explosions
     
     if not explosion_data:
-        print("No gradient explosion data found for batch comparison")
+        logger.debug("No gradient explosion data found for batch comparison")
         return
     
     all_rounds = sorted(all_rounds)
@@ -1309,7 +1312,7 @@ def _plot_batch_gradient_explosions(test_folders, metrics_folder):
 def _create_gradient_explosions_heatmap(explosion_data, all_rounds, metrics_folder):
     """Create a heatmap showing gradient explosions per test and round."""
     if not explosion_data:
-        print("No gradient explosion data found for heatmap generation")
+        logger.debug("No gradient explosion data found for heatmap generation")
         return
     
     # Prepare data for heatmap
