@@ -1,0 +1,227 @@
+/* ============================================ */
+/*  Atlantico Server TUI - Minimal Dark Theme  */
+/* ============================================ */
+
+/* === GLOBAL STYLES === */
+Screen {
+    background: $surface;
+    padding: 0 1;
+}
+
+/* === LAYOUT COMPONENTS === */
+Header {
+    dock: top;
+    margin-bottom: 1;
+    color: $text;
+}
+
+CustomFooter {
+    dock: bottom;
+    height: 3;
+}
+
+CustomFooter > Static {
+    color: $text-muted;
+    padding: 0 2;
+    border: round $panel;
+    content-align: left middle;
+}
+
+/* === BASE CONTAINERS === */
+
+.panel {
+    border: round $panel;
+    padding: 1 0 0 4;
+    border-title-color: $text-muted;
+}
+
+Horizontal {
+    align-horizontal: left;
+}
+
+/* === COMMON WIDGETS === */
+Button {
+    min-width: 16;
+    margin: 0 1;
+    padding: 0 1;
+}
+
+Button:focus {
+    text-style: bold underline;
+    background: #000 !important;
+}
+
+Input {
+    background: $surface;
+    border: tall $panel;
+    padding: 0 2;
+}
+
+Input:focus {
+    border: tall $primary;
+}
+
+Input.-invalid {
+    border: tall $error;
+}
+
+DataTable {
+    background: $background;
+    border: round $panel;
+}
+
+DataTable > .datatable--header {
+    background: $surface;
+    color: $foreground;
+    text-style: bold;
+}
+
+DataTable > .datatable--odd-row {
+    background: $background;
+}
+
+DataTable > .datatable--even-row {
+    background: $surface;
+}
+
+DataTable > .datatable--cursor {
+    background: $boost;
+}
+
+DataTable:focus > .datatable--cursor {
+    background: $primary;
+    color: $text;
+}
+
+ProgressBar {
+    background: $surface;
+}
+
+ProgressBar > .bar--bar {
+    color: $success;
+}
+
+ProgressBar > .bar--complete {
+    color: $success;
+}
+
+ProgressBar > .bar--indeterminate {
+    color: $primary;
+}
+
+RichLog {
+    background: $surface;
+}
+
+/* === UTILITY CLASSES === */
+
+
+.gapper > * {
+    margin-top: 1;
+}
+
+.gapper > *:first-child {
+    margin-top: 0;
+}
+
+/* ============================================ */
+/*  DASHBOARD SCREEN                           */
+/* ============================================ */
+ServerStatusPanel {
+    height: 9;
+}
+
+QuickActionsPanel {
+    height: 7;}
+
+QuickActionsPanel > Horizontal {
+    align-horizontal: center;
+}
+
+ActivityFeedPanel {
+    height: 1fr;
+    min-height: 15;
+}
+
+ActivityFeedPanel #activity-log {
+    border: none;
+    height: 1fr;
+}
+
+/* ============================================ */
+/*  DEVICES SCREEN                             */
+/* ============================================ */
+#all-devices-table,
+#federated-devices-table {
+    height: 1fr;
+    min-height: 10;
+    margin: 1 0;
+}
+
+/* ============================================ */
+/*  FEDERATED LEARNING SCREEN                  */
+/* ============================================ */
+
+ConfigurationPanel {
+    background: red;
+    height: auto;
+}
+
+ConfigurationPanel Horizontal {
+    width: 100%;
+    margin-bottom: 1;
+    height: auto;
+}
+
+ConfigurationPanel .config-label {
+    width: 12;
+    min-width: 12;
+    height: 3;
+    content-align-vertical: middle;
+    padding-left: 1;
+}
+
+ConfigurationPanel .config-input {
+    margin-left: 1;
+}
+
+TrainingControlPanel .control-buttons {
+    padding: 1 2;
+    align-horizontal: center;
+}
+
+ProgressPanel {
+    min-height: 14;
+}
+
+ProgressPanel #progress-status {
+    padding: 1 2;
+    text-style: bold;
+    height: 3;
+    content-align-vertical: middle;
+}
+
+ProgressPanel #round-progress {
+    margin: 0 2 1 2;
+    height: 3;
+}
+
+MetricsPanel {
+    min-height: 8;
+}
+
+/* ============================================ */
+/*  LOGS SCREEN                                */
+/* ============================================ */
+#log-count {   
+    color: $text-muted;
+    height: 1;
+    margin-bottom: 1;
+}
+
+#log-display {
+    height: 1fr;
+    border: none;
+    background: $surface;
+    padding: 0;
+}

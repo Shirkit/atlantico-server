@@ -26,12 +26,12 @@ class EmojiFormatter(logging.Formatter):
     """Formatter that adds emoji indicators based on log level"""
     
     def format(self, record):
-        # Add emoji icon
-        icon = LEVEL_ICONS.get(record.levelno, 'ℹ️')
-        # Format: [HH:MM:SS] 🔍 message
+        # Format: [HH:MM:SS.mmm] (LEVEL) message (with milliseconds)
         timestamp = self.formatTime(record, '%H:%M:%S')
-        # return f"[{timestamp}] {icon} {record.getMessage()}"
-        return f"[{timestamp}] {record.getMessage()}"
+        # Add milliseconds
+        timestamp_with_ms = f"{timestamp}.{int(record.msecs):03d}"
+        level = record.levelname
+        return f"[{timestamp_with_ms}] ({level}) {record.getMessage()}"
 
 
 def setup_logging(debug: bool = False, enable_stdout: bool = True) -> logging.Logger:
@@ -58,7 +58,7 @@ def setup_logging(debug: bool = False, enable_stdout: bool = True) -> logging.Lo
     # Always create file handler (TUI will tail this file)
     try:
         os.makedirs(os.path.dirname(LOG_PATH) or '.', exist_ok=True)
-        file_handler = logging.FileHandler(LOG_PATH, mode='w', encoding='utf-8')  # 'w' to clear on start
+        file_handler = logging.FileHandler(LOG_PATH, mode='a', encoding='utf-8')  # 'a' to append
         file_handler.setFormatter(EmojiFormatter())
         file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
         logger.addHandler(file_handler)

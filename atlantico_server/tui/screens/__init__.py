@@ -1,15 +1,15 @@
-"""TUI Views"""
+"""TUI Screens"""
 
-from .dashboard import DashboardView
-from .devices import DevicesView
-from .federated import FederatedView
-from .logs import LogsView
-from .settings import SettingsView
+from .dashboard import DashboardScreen
+from .devices import DevicesScreen
+from .federated import FederatedScreen
+from .logs import LogsScreen
+from .settings import SettingsScreen
 
 __all__ = [
-    "DashboardView",
-    "DevicesView", 
-    "FederatedView",
-    "LogsView",
-    "SettingsView",
+    "DashboardScreen",
+    "DevicesScreen", 
+    "FederatedScreen",
+    "LogsScreen",
+    "SettingsScreen",
 ]

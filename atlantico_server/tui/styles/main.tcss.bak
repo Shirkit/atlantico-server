@@ -1,0 +1,455 @@
+/* ============================================================================
+   Atlantico Server TUI - Main Stylesheet
+   
+   Minimal dark theme matching the original ASCII mockups
+   Clean borders, subtle colors, professional appearance
+   ============================================================================ */
+
+/* ============================================================================
+   Global Styles
+   ============================================================================ */
+
+Screen {
+}
+
+#content-area {
+    height: 1fr;
+}
+
+/* ============================================================================
+   Header & Footer
+   ============================================================================ */
+
+Header {
+    background: $surface;
+    color: $text;
+}
+
+CustomFooter {
+    height: auto;
+    width: 100%;
+    padding: 0 2 0 2;
+}
+
+#custom-footer {
+    height: auto;
+    background: $surface;
+    border: round $panel;
+}
+
+#footer-content {
+    color: $text-muted;
+    padding: 0 2;
+    height: 1;
+    content-align: left middle;
+    background: $surface;
+    margin-bottom: 1;
+}
+
+/* ============================================================================
+   Typography & Text Styles
+   ============================================================================ */
+
+.view-title {
+    text-style: bold;
+    color: $foreground;
+    background: $background;
+    padding: 0 2;
+    height: 3;
+    content-align-vertical: middle;
+}
+
+.panel-title {
+    text-style: bold;
+    color: $foreground;
+    background: $background;
+    padding: 0 2;
+    height: 1;
+}
+
+.section-title {
+    text-style: bold;
+    color: $foreground;
+    background: $background;
+    padding: 0 2;
+    height: 3;
+    content-align-vertical: middle;
+}
+
+.table-title {
+    text-style: bold;
+    color: $foreground;
+    background: $background;
+    padding: 0 2;
+    height: 1;
+}
+
+/* ============================================================================
+   Containers & Panels
+   ============================================================================ */
+
+Container {
+    background: $surface;
+    height: auto;
+    border-title-color: $text-muted;
+}
+
+.panel {
+    border: round $panel;
+    background: $surface;
+    padding: 1 2;
+    margin-bottom: 1;
+}
+
+.panel-content {
+    background: $surface;
+    padding: 1 2;
+    height: auto;
+}
+
+/* ============================================================================
+   Buttons
+   ============================================================================ */
+
+Button {
+    min-width: 16;
+    margin: 0 1;
+}
+
+Button:hover {
+    text-style: bold;
+}
+
+Button:focus {
+    text-style: bold reverse;
+}
+
+/* ============================================================================
+   DataTables
+   ============================================================================ */
+
+DataTable {
+    background: $background;
+    border: round $panel;
+    height: auto;
+}
+
+DataTable > .datatable--header {
+    background: $surface;
+    color: $foreground;
+    text-style: bold;
+}
+
+DataTable > .datatable--odd-row {
+    background: $background;
+}
+
+DataTable > .datatable--even-row {
+    background: $surface;
+}
+
+DataTable > .datatable--cursor {
+    background: $boost;
+}
+
+DataTable:focus > .datatable--cursor {
+    background: $primary;
+    color: $text;
+}
+
+/* ============================================================================
+   Input Fields
+   ============================================================================ */
+
+Input {
+    background: $surface;
+    border: tall $panel;
+    padding: 0 2;
+}
+
+Input:focus {
+    border: tall $primary;
+}
+
+Input.-invalid {
+    border: tall $error;
+}
+
+/* ============================================================================
+   Progress Indicators
+   ============================================================================ */
+
+ProgressBar {
+    background: $surface;
+}
+
+ProgressBar > .bar--bar {
+    color: $success;
+}
+
+ProgressBar > .bar--complete {
+    color: $success;
+}
+
+ProgressBar > .bar--indeterminate {
+    color: $primary;
+}
+
+/* ============================================================================
+   Status Indicators
+   ============================================================================ */
+
+.status-online {
+    color: $text-success;
+}
+
+.status-offline {
+    color: $text-error;
+}
+
+.status-warning {
+    color: $text-warning;
+}
+
+.status-active {
+    color: $text-primary;
+}
+
+.status-idle {
+    color: $text-muted;
+}
+
+/* ============================================================================
+   Logs & Rich Content
+   ============================================================================ */
+
+RichLog {
+    background: $surface;
+    border: round $panel;
+    padding: 1;
+}
+
+RichLog:focus {
+    border: round $primary;
+}
+
+/* ============================================================================
+   Horizontal Layouts
+   ============================================================================ */
+
+Horizontal {
+    height: auto;
+    align-horizontal: left;
+}
+
+.actions-row {
+    height: auto;
+    padding: 1;
+    align-horizontal: center;
+}
+
+.form-row {
+    height: auto;
+    padding: 1 0;
+    align-horizontal: left;
+}
+
+/* ============================================================================
+   Vertical Layouts
+   ============================================================================ */
+
+Vertical {
+}
+
+/* ============================================================================
+   Spacing Utilities
+   ============================================================================ */
+
+.mt-1 { margin-top: 1; }
+.mt-2 { margin-top: 2; }
+.mb-1 { margin-bottom: 1; }
+.mb-2 { margin-bottom: 2; }
+.mx-1 { margin: 0 1; }
+.mx-2 { margin: 0 2; }
+.my-1 { margin: 1 0; }
+.my-2 { margin: 2 0; }
+
+.pt-1 { padding-top: 1; }
+.pt-2 { padding-top: 2; }
+.pb-1 { padding-bottom: 1; }
+.pb-2 { padding-bottom: 2; }
+.px-1 { padding: 0 1; }
+.px-2 { padding: 0 2; }
+.py-1 { padding: 1 0; }
+.py-2 { padding: 2 0; }
+
+/* ============================================================================
+   Dashboard View
+   ============================================================================ */
+
+DashboardView {
+    layout: vertical;
+    padding: 1 2;
+}
+
+DashboardView Static {
+    padding: 1 2;
+    margin-bottom: 1;
+}
+
+DashboardView Button {
+    margin: 1 2;
+}
+
+ServerStatusPanel {
+    height: auto;
+    max-height: 12;
+    border: round $panel;
+    margin-bottom: 1;
+}
+
+QuickActionsPanel {
+    height: auto;
+    border: round $panel;
+    margin-bottom: 1;
+}
+
+ActivityFeedPanel {
+    height: 1fr;
+    min-height: 15;
+    border: round $panel;
+}
+
+ActivityFeedPanel #activity-log {
+    border: none;
+    background: $surface;
+    padding: 1 2;
+    height: 1fr;
+}
+
+/* ============================================================================
+   Devices View
+   ============================================================================ */
+
+DevicesView {
+    padding: 1 2;
+    layout: vertical;
+}
+
+#devices-header {
+    height: auto;
+    padding: 1 2;
+    border: round $panel;
+    margin-bottom: 1;
+}
+
+#all-devices-table {
+    height: 1fr;
+    min-height: 10;
+    margin: 1 0 1 0;
+    border: round $panel;
+}
+
+#federated-devices-table {
+    height: 1fr;
+    min-height: 10;
+    margin: 1 0 1 0;
+    border: round $panel;
+}
+
+/* ============================================================================
+   Federated View
+   ============================================================================ */
+
+FederatedView {
+    layout: vertical;
+    padding: 1 2;
+    overflow-y: auto;
+}
+
+ConfigurationPanel {
+    height: auto;
+    border: round $panel;
+    margin-bottom: 1;
+}
+
+ConfigurationPanel Horizontal {
+    height: auto;
+    width: 100%;
+    padding: 1 2;
+}
+
+ConfigurationPanel .config-label {
+    width: 12;
+    min-width: 12;
+    height: 3;
+    content-align-vertical: middle;
+    padding-left: 1;
+}
+
+ConfigurationPanel .config-input {
+    width: 1fr;
+    height: 3;
+    margin-left: 1;
+}
+
+TrainingControlPanel {
+    height: auto;
+    border: round $panel;
+    margin-bottom: 1;
+}
+
+TrainingControlPanel .control-buttons {
+    height: auto;
+    padding: 1 2;
+    align-horizontal: center;
+}
+
+ProgressPanel {
+    height: auto;
+    min-height: 14;
+    border: round $panel;
+    margin-bottom: 1;
+}
+
+ProgressPanel #progress-status {
+    padding: 1 2;
+    text-style: bold;
+    height: 3;
+    content-align-vertical: middle;
+}
+
+ProgressPanel #round-progress {
+    margin: 0 2 1 2;
+    height: 3;
+}
+
+MetricsPanel {
+    height: auto;
+    min-height: 8;
+    border: round $panel;
+}
+
+/* ============================================================================
+   Logs View
+   ============================================================================ */
+
+LogsView {
+    layout: vertical;
+    padding: 1 2;
+}
+
+#log-count {
+    padding: 1 2;
+    color: $text-muted;
+    height: 3;
+    content-align-vertical: middle;
+    margin-bottom: 1;
+}
+
+#log-display {
+    height: 1fr;
+    border: round $panel;
+    background: $surface;
+    padding: 1 2;
+}

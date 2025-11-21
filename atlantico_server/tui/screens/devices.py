@@ -1,80 +1,69 @@
-"""Devices Monitor View"""
+"""Devices Monitor Screen"""
 
-from textual.widgets import Static, Button, DataTable, Label
+from textual.app import ComposeResult
+from textual.screen import Screen
+from textual.widgets import Static, Button, DataTable, Header
 from textual.containers import Container, Vertical, Horizontal
 from datetime import datetime
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from atlantico_server.tui.app import CustomFooter
 
 
-class DevicesView(Vertical):
-    """Device monitoring view"""
+class DevicesScreen(Screen):
+    """Devices screen"""
     
-    CSS = """
-    DevicesView {
-        padding: 1;
-    }
-    
-    #devices-header {
-        height: auto;
-        padding: 1;
-    }
-    
-    #devices-table {
-        height: 1fr;
-        margin: 1;
-    }
-    
-    #device-details {
-        height: 6;
-        border: solid blue;
-        padding: 1;
-        margin: 1;
-    }
-    """
-    
-    def __init__(self, server=None, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, server=None):
+        super().__init__()
         self.server = server
         self.selected_device = None
+        self._refresh_timer = None
     
-    def compose(self):
-        """Create view layout"""
-        yield Container(
-            Label("📱 Device Monitor", classes="view-title"),
+    def compose(self) -> ComposeResult:
+        yield Header()
+        
+        all_devices_container = Container(
             Container(
                 Static("All Devices: 0", id="all-devices-label"),
                 Static("Federated Devices: 0", id="federated-devices-label"),
                 id="devices-header"
             ),
-            Label("All Devices", classes="table-title"),
             DataTable(id="all-devices-table"),
-            Label("Current Federated Round", classes="table-title"),
+            classes="panel"
+        )
+        all_devices_container.border_title = "All Devices"
+        yield all_devices_container
+        
+        federated_container = Container(
             DataTable(id="federated-devices-table"),
+            classes="panel"
         )
+        federated_container.border_title = "Current Federated Round"
+        yield federated_container
         
-        # Device table
-        table = DataTable(id="devices-table")
-        table.add_columns("Device ID", "Status", "Last Seen", "Round", "Progress")
-        yield table
-        
-        # Device details panel
-        yield Container(
-            Static("Select a device to view details", id="device-details-content"),
-            id="device-details"
-        )
+        footer = CustomFooter(id="custom-footer")
+        footer.current_view = "devices"
+        yield footer
     
     def on_mount(self):
-        """Setup when view is mounted"""
-        # Setup all devices table
+        """Setup when mounted"""
         all_table = self.query_one("#all-devices-table", DataTable)
         all_table.add_columns("Device ID", "Status", "Last Seen")
         all_table.cursor_type = "row"
         
-        # Setup federated devices table
         fed_table = self.query_one("#federated-devices-table", DataTable)
         fed_table.add_columns("Device ID", "Round", "Progress", "Status")
         fed_table.cursor_type = "row"
-        
-        self.set_interval(2.0, self.refresh_devices)
+    
+    def on_show(self):
+        """Start refreshing when screen becomes visible"""
+        self.refresh_devices()
+        self._refresh_timer = self.set_interval(2.0, self.refresh_devices)
+    
+    def on_hide(self):
+        """Stop refreshing when screen is hidden"""
+        if self._refresh_timer:
+            self._refresh_timer.stop()
     
     def refresh_devices(self):
         """Refresh device lists from server state"""
@@ -89,6 +78,7 @@ class DevicesView(Vertical):
         
         # Update all devices table
         all_table = self.query_one("#all-devices-table", DataTable)
+        saved_cursor = all_table.cursor_row
         all_table.clear()
         
         for device_id, device_info in connected_clients.items():
@@ -108,8 +98,12 @@ class DevicesView(Vertical):
             
             all_table.add_row(device_id, status, last_seen)
         
+        if saved_cursor is not None and saved_cursor < all_table.row_count:
+            all_table.move_cursor(row=saved_cursor)
+        
         # Update federated devices table
         fed_table = self.query_one("#federated-devices-table", DataTable)
+        saved_fed_cursor = fed_table.cursor_row
         fed_table.clear()
         
         for device_id, device_info in federated_clients.items():
@@ -126,9 +120,15 @@ class DevicesView(Vertical):
             status = "● Active" if is_alive else "○ Offline"
             fed_table.add_row(device_id, str(round_num), str(progress), status)
         
+        if saved_fed_cursor is not None and saved_fed_cursor < fed_table.row_count:
+            fed_table.move_cursor(row=saved_fed_cursor)
+        
         # Update labels
         all_label = self.query_one("#all-devices-label", Static)
         all_label.update(f"All Devices: {len(connected_clients)}")
         
         fed_label = self.query_one("#federated-devices-label", Static)
         fed_label.update(f"Federated Devices: {len(federated_clients)}")
+
+
+

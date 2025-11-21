@@ -437,6 +437,11 @@ class MQTTFederatedServer:
         # PRIMARY METHOD: Try binary .nn files first
         nn_files = [f for f in files if f.endswith('.nn') and f != "aggregated_weights.nn"]
         
+        # Filter to only include files from federated clients
+        if self.state.federated_clients:
+            federated_device_ids = set(self.state.federated_clients.keys())
+            nn_files = [f for f in nn_files if any(device_id in f for device_id in federated_device_ids)]
+        
         if nn_files:
             return self._aggregate_weights_binary(source_dir, nn_files, round_number)
         else:

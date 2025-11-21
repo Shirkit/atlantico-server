@@ -1,35 +1,40 @@
-"""Federated Learning Control View"""
+"""Federated Learning Control Screen"""
 
-from textual.widgets import Static, Button, Label, Input, ProgressBar
+from textual.app import ComposeResult
+from textual.screen import Screen
+from textual.widgets import Static, Button, Label, Input, ProgressBar, Header
 from textual.containers import Container, Vertical, Horizontal, VerticalScroll
 from textual.reactive import reactive
-import threading
+import threading, sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from atlantico_server.tui.app import CustomFooter
 
 
 class ConfigurationPanel(Container):
     """Panel for training configuration"""
     
-    def __init__(self, server=None):
-        super().__init__()
+    def __init__(self, server=None, config=None):
+        super().__init__(classes="panel")
         self.server = server
+        self.config = config or {}
+        self.border_title = "Training Configuration"
     
     def compose(self):
-        yield Label("⚙️ Training Configuration", classes="panel-title")
         yield Horizontal(
             Label("Rounds:", classes="config-label"),
-            Input(value="10", placeholder="Number of rounds", id="input-rounds", classes="config-input"),
+            Input(value=self.config.get("rounds"), placeholder="Number of rounds", id="input-rounds", classes="config-input"),
         )
         yield Horizontal(
             Label("Epochs:", classes="config-label"),
-            Input(value="5", placeholder="Epochs per device", id="input-epochs", classes="config-input"),
+            Input(value=self.config.get("epochs"), placeholder="Epochs per device", id="input-epochs", classes="config-input"),
         )
         yield Horizontal(
             Label("Clients:", classes="config-label"),
-            Input(value="4", placeholder="Number of devices", id="input-clients", classes="config-input"),
+            Input(value=self.config.get("clients"), placeholder="Number of devices", id="input-clients", classes="config-input"),
         )
         yield Horizontal(
             Label("Batch:", classes="config-label"),
-            Input(value="batch-config/batch.json", placeholder="Path", id="input-batch", classes="config-input"),
+            Input(value=self.config.get("batch"), placeholder="Path", id="input-batch", classes="config-input"),
         )
 
 
@@ -40,11 +45,11 @@ class TrainingControlPanel(Container):
     is_paused = reactive(False)
     
     def __init__(self, server=None):
-        super().__init__()
+        super().__init__(classes="panel")
         self.server = server
+        self.border_title = "Training Controls"
     
     def compose(self):
-        yield Label("🎮 Training Controls", classes="panel-title")
         yield Horizontal(
             Button("▶ Start Training", id="btn-start-training", variant="success"),
             Button("⏹ Stop", id="btn-stop-training", variant="error", disabled=True),
@@ -82,11 +87,11 @@ class ProgressPanel(Container):
     total_devices = reactive(0)
     
     def __init__(self, server=None):
-        super().__init__()
+        super().__init__(classes="panel")
         self.server = server
+        self.border_title = "Training Progress"
     
     def compose(self):
-        yield Label("📊 Training Progress", classes="panel-title")
         yield Static("Not started", id="progress-status")
         yield ProgressBar(total=100, show_eta=False, id="round-progress")
         yield Static("Devices: 0/0 completed", id="device-progress")
@@ -137,11 +142,11 @@ class MetricsPanel(Container):
     """Panel showing training metrics"""
     
     def __init__(self, server=None):
-        super().__init__()
+        super().__init__(classes="panel")
         self.server = server
+        self.border_title = "Metrics"
     
     def compose(self):
-        yield Label("📈 Metrics", classes="panel-title")
         yield Static("No metrics yet", id="metrics-display")
     
     def update_metrics(self, accuracy: float = 0.0, loss: float = 0.0):
@@ -153,97 +158,22 @@ class MetricsPanel(Container):
         )
 
 
-class FederatedView(Vertical):
-    """Federated learning control view"""
+class FederatedScreen(Screen):
+    """Federated learning screen"""
     
-    CSS = """
-    FederatedView {
-        layout: vertical;
-        padding: 1;
-        overflow-y: auto;
-    }
-    
-    .view-title {
-        text-style: bold;
-        background: $boost;
-        padding: 1;
-        margin-bottom: 1;
-        height: 3;
-    }
-    
-    .panel-title {
-        text-style: bold;
-        background: $boost;
-        padding: 1;
-        height: 3;
-    }
-    
-    .config-label {
-        width: 12;
-        height: 3;
-        content-align: center left;
-    }
-    
-    .config-input {
-        width: 1fr;
-        height: 3;
-    }
-    
-    ConfigurationPanel Horizontal {
-        height: 3;
-        width: 100%;
-    }
-    
-    .control-buttons {
-        height: auto;
-        padding: 1;
-    }
-    
-    ConfigurationPanel {
-        height: 16;
-        max-height: 16;
-        border: solid blue;
-        margin-bottom: 1;
-        overflow: hidden;
-    }
-    
-    TrainingControlPanel {
-        height: 6;
-        max-height: 6;
-        border: solid green;
-        margin-bottom: 1;
-        overflow: hidden;
-    }
-    
-    ProgressPanel {
-        height: 11;
-        max-height: 11;
-        border: solid yellow;
-        margin-bottom: 1;
-        overflow: hidden;
-    }
-    
-    MetricsPanel {
-        height: 5;
-        max-height: 5;
-        border: solid magenta;
-        overflow: hidden;
-    }
-    """
-    
-    def __init__(self, server=None, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, server=None, config=None):
+        super().__init__()
         self.server = server
+        self.config = config or {}
         self.config_panel = None
         self.control_panel = None
         self.progress_panel = None
         self.metrics_panel = None
     
-    def compose(self):
-        """Create view layout"""
-        yield Label("🤝 Federated Learning Control", classes="view-title")
+    def compose(self) -> ComposeResult:
+        yield Header()
         
-        self.config_panel = ConfigurationPanel(self.server)
+        self.config_panel = ConfigurationPanel(self.server, self.config)
         self.control_panel = TrainingControlPanel(self.server)
         self.progress_panel = ProgressPanel(self.server)
         self.metrics_panel = MetricsPanel(self.server)
@@ -252,6 +182,25 @@ class FederatedView(Vertical):
         yield self.control_panel
         yield self.progress_panel
         yield self.metrics_panel
+        
+        footer = CustomFooter(id="custom-footer")
+        footer.current_view = "federated"
+        yield footer
+    
+    def on_mount(self) -> None:
+        """Prevent auto-focus on inputs when screen loads"""
+        self.screen.focus()
+    
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Save config values as they change"""
+        if event.input.id == "input-rounds":
+            self.config["rounds"] = event.value
+        elif event.input.id == "input-epochs":
+            self.config["epochs"] = event.value
+        elif event.input.id == "input-clients":
+            self.config["clients"] = event.value
+        elif event.input.id == "input-batch":
+            self.config["batch"] = event.value
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button clicks"""
@@ -336,3 +285,6 @@ class FederatedView(Vertical):
             # Pause
             if self.server.pause_federated_learning():
                 self.control_panel.set_training_state(True, is_paused=True)
+
+
+

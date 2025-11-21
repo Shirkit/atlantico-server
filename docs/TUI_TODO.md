@@ -73,6 +73,36 @@
 
 ---
 
+## Completed (Recently) ✅
+
+### Phase 5.5: UI Architecture & Polish
+**Completed:** November 2025  
+**Effort:** ~6 hours
+
+#### Architecture Changes ✅
+- ✅ Converted from ContentSwitcher to Screen-based navigation
+- ✅ Created CustomFooter with reactive highlighting of current view
+- ✅ Dynamic header showing screen name
+- ✅ CSS hot reload development setup (DEV_HOT_RELOAD.md, run_dev.sh)
+
+#### CSS Organization ✅
+- ✅ Created main.tcss (228 lines) - consolidated all inline CSS
+- ✅ Created .panel utility class for consistent container styling
+- ✅ Responsive dashboard layout with flexible activity feed
+- ✅ Minimal dark theme with design tokens
+
+#### Visual Polish ✅
+- ✅ Button focus styling refined
+- ✅ Border titles aligned left
+- ✅ Prevented auto-focus on inputs
+- ✅ Removed emoji panel titles for cleaner look
+
+**Key Files Changed:**
+- app.py, screens/*.py, styles/main.tcss, server_tui.py
+- All *View classes renamed to *Screen
+
+---
+
 ## In Progress ⏳
 
 *No active work in progress - ready for Phase 6*
@@ -80,6 +110,51 @@
 ---
 
 ## Upcoming 📋
+
+### Phase 5.6: Additional UI Polish
+**Priority:** Medium  
+**Estimated Effort:** 4-5 hours
+
+#### Device Monitor Polish
+- [ ] Improve table appearance
+  - [ ] Better column widths
+  - [ ] Alternate row colors (already done via CSS)
+  - [ ] Status icons instead of text (● / ○)
+- [ ] Add summary statistics panel
+  - [ ] Total devices / Active / Inactive counts
+  - [ ] Average accuracy across devices
+  - [ ] Visual indicators
+- [ ] Better state transitions
+  - [ ] Smooth updates without flicker
+
+#### Federated Learning Screen Polish
+- [ ] Improve configuration panel
+  - [ ] Better input field styling (already decent)
+  - [ ] Input validation feedback (red border on invalid)
+  - [ ] Help text for each field
+- [ ] Enhance progress display
+  - [ ] Styled progress bar with colors
+  - [ ] Better round counter layout
+  - [ ] Status badges instead of plain text
+- [ ] Polish control buttons
+  - [ ] Add icons/emojis to buttons (▶ ⏹ ⏸)
+- [ ] Metrics panel improvements
+  - [ ] Chart-like visual for history
+  - [ ] Color-coded improvements/declines
+  - [ ] Better number formatting (2 decimal places)
+
+#### Logs Screen Polish
+- [ ] Improve log display
+  - [ ] Better syntax highlighting for log levels
+  - [ ] Cleaner timestamp format
+  - [ ] Level badges/pills instead of emojis
+- [ ] Add filter UI
+  - [ ] Level selector buttons (INFO/DEBUG/WARNING/ERROR)
+  - [ ] Search input field
+  - [ ] Clear/export buttons
+- [ ] Better scrolling behavior
+  - [ ] Auto-scroll toggle
+  - [ ] Jump to top/bottom
 
 ### Phase 6: Settings Screen
 **Priority:** Medium  
@@ -174,6 +249,44 @@ Tasks:
 - [ ] Consider removing test FL button from dashboard
   - Proper Federated Learning screen implemented with full controls
   - Kept for backwards compatibility and quick testing
+
+### Low Priority
+- [ ] Add animations/transitions for screen changes
+- [ ] Implement keyboard shortcuts help screen (?)
+- [ ] Add system resource monitoring panel
+
+---
+
+## Changes Summary (November 2025)
+
+### Architecture Refactor
+1. **ContentSwitcher → Screen Navigation**
+   - Removed ContentSwitcher, replaced with proper Screen-based architecture
+   - Each view is now a Screen class with its own compose()
+   - Header and CustomFooter docked in each screen
+   - switch_screen() for navigation instead of ContentSwitcher.current
+
+2. **File Structure Changes**
+   - app.py: Added CustomFooter class, removed inline CSS, added update_header()
+   - screens/*.py: Renamed *View → *Screen, added Header/Footer to compose()
+   - screens/__init__.py: Updated exports to *Screen classes
+   - styles/main.tcss: New organized stylesheet (228 lines)
+   - DEV_HOT_RELOAD.md: New CSS hot reload documentation
+   - run_dev.sh: New development script
+   - server_tui.py: Added create_app() factory, app instance for textual run
+
+3. **CSS Organization**
+   - Consolidated all styles into main.tcss
+   - Organized: Global → Layout → Base → Common → Utility → Screen-specific
+   - Created .panel utility class for consistent container styling
+   - Applied semantic design tokens ($surface, $panel, $text-muted, etc.)
+
+4. **Visual Improvements**
+   - Button focus: bold + underline + dark background
+   - Border titles aligned left
+   - Responsive dashboard with flexible activity feed
+   - Footer highlights current screen in bold white
+   - Header shows current screen name + "AILA Federated Framework"
 
 ### Medium Priority
 - [ ] Implement log filtering in Logs view
@@ -294,10 +407,37 @@ atlantico-server/
 
 ---
 
-**Last Updated:** November 14, 2025  
-**Current Phase:** Phases 1-5 complete (including system-wide logging refactoring), ready for Phase 6 (Settings Screen)
+**Last Updated:** November 15, 2025  
+**Current Phase:** Phases 1-5.5 complete (including system-wide logging refactoring + UI architecture overhaul), ready for Phase 6 (Settings Screen)
 
 ### Recent Commits
 - `c51fdf3` - refactor(server): modernize logging system and remove CLI menu
 - `3b98eb8` - refactor(parser): convert print statements to logger calls
 - `794b872` - refactor(tui): replace print statements with logger in server_tui.py
+- **Pending** - refactor(tui): complete UI overhaul - Screen-based architecture, organized CSS, responsive layouts
+
+---
+
+## Change Summary (November 15, 2025)
+
+### Architecture Refactor
+- **ContentSwitcher → Screen Navigation:** Replaced ContentSwitcher with proper Screen-based architecture
+- **All *View → *Screen:** Renamed all view classes to Screen classes
+- **Docked Header/Footer:** Each screen now has docked Header and CustomFooter in its compose()
+- **CSS Consolidation:** Moved all inline CSS (~530 lines) to single main.tcss (228 lines)
+
+### New Features
+- **CustomFooter:** Reactive footer highlighting current screen
+- **Dynamic Header:** Shows "{screen_name} • AILA Federated Framework"
+- **CSS Hot Reload:** Development setup with textual run --dev
+- **.panel Utility Class:** Consistent styling across all containers
+
+### Files Created
+- styles/main.tcss (consolidated stylesheet)
+- DEV_HOT_RELOAD.md (developer documentation)
+- run_dev.sh (development launcher)
+
+### Files Modified
+- app.py, server_tui.py, all 5 screens, screens/__init__.py
+
+**Result:** Cleaner architecture, organized CSS, better maintainability

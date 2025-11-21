@@ -1,9 +1,14 @@
-"""Dashboard View"""
+"""Dashboard Screen"""
 
-from textual.widgets import Static, Button, Label, RichLog
+from textual.app import ComposeResult
+from textual.screen import Screen
+from textual.widgets import Static, Button, Header, RichLog
 from textual.containers import Container, Vertical, Horizontal
 from textual.reactive import reactive
 import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from atlantico_server.tui.app import CustomFooter
 
 
 class ServerStatusPanel(Container):
@@ -15,16 +20,16 @@ class ServerStatusPanel(Container):
     max_rounds = reactive(0)
     
     def __init__(self, server=None):
-        super().__init__()
+        super().__init__(classes="panel")
         self.server = server
+        self.border_title = "Server Status"
     
     def compose(self):
-        yield Label("📊 Server Status", classes="panel-title")
-        yield Container(
+        yield Vertical(
             Static(id="connection-status"),
             Static(id="device-count"),
             Static(id="round-info"),
-            classes="status-content"
+            classes="gapper"
         )
     
     def on_mount(self):
@@ -69,17 +74,15 @@ class QuickActionsPanel(Container):
     """Panel with quick action buttons"""
     
     def __init__(self, server=None):
-        super().__init__()
+        super().__init__(classes="panel")
         self.server = server
+        self.border_title = "Quick Actions"
     
     def compose(self):
-        yield Label("⚡ Quick Actions", classes="panel-title")
         yield Horizontal(
-            Button("Check Devices", id="btn-check-devices", variant="primary"),
-            Button("View Logs", id="btn-view-logs", variant="default"),
-            # TODO: TEMPORARY - Remove this button after testing federated process
-            Button("Start Test FL (2 rounds)", id="btn-start-federated-test", variant="warning"),
-            classes="actions-row"
+            Button("Check Devices", id="btn-check-devices"),
+            Button("View Logs", id="btn-view-logs"),
+            Button("Start Training", id="btn-start-federated-test")
         )
 
 
@@ -87,13 +90,13 @@ class ActivityFeedPanel(Container):
     """Panel showing recent activity - reads last 10 lines from log file"""
     
     def __init__(self, log_file="run/logs/server.log"):
-        super().__init__()
+        super().__init__(classes="panel")
         self.log_file = log_file
         self.max_lines = 10
         self.last_line_count = 0
+        self.border_title = "Recent Activity"
     
     def compose(self):
-        yield Label("📋 Recent Activity", classes="panel-title")
         yield RichLog(id="activity-log", highlight=True, markup=True)
     
     def on_mount(self):
@@ -136,80 +139,23 @@ class ActivityFeedPanel(Container):
                 self.last_line_count = -1
 
 
-class DashboardView(Vertical):
-    """Main dashboard view"""
+class DashboardScreen(Screen):
+    """Dashboard screen"""
     
-    CSS = """
-    DashboardView {
-        layout: vertical;
-        padding: 1;
-    }
-    
-    .panel-title {
-        text-style: bold;
-        background: $boost;
-        padding: 1;
-        margin-bottom: 1;
-    }
-    
-    .status-content {
-        padding: 1;
-        height: auto;
-    }
-    
-    .actions-row {
-        height: auto;
-        padding: 1;
-    }
-    
-    .activity-content {
-        height: 10;
-        border: solid green;
-        padding: 1;
-        overflow-y: auto;
-    }
-    
-    ServerStatusPanel {
-        height: auto;
-        max-height: 8;
-        border: solid blue;
-        margin-bottom: 1;
-    }
-    
-    .view-title {
-        text-style: bold;
-        background: $boost;
-        padding: 1;
-        margin-bottom: 1;
-    }
-    
-    QuickActionsPanel {
-        height: 6;
-        border: solid yellow;
-        margin-bottom: 1;
-    }
-    
-    ActivityFeedPanel {
-        height: 15;
-        border: solid magenta;
-    }
-    """
-    
-    def __init__(self, server=None, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, server=None):
+        super().__init__()
         self.server = server
         self.activity_feed = None
     
-    def compose(self):
-        """Create view layout"""
-        # yield ServerStatusPanel(self.server)
-        # TODO: TEMPORARY - Simplified for testing. ServerStatusPanel removed because it was blocking other widgets.
-        yield Label("Atlantico Federated Learning Server", classes="view-title")
-        yield Static(f"Connected Devices: {len(self.server.state.connected_clients) if self.server else 0}")
-        yield Label("⚡ Test Federated Learning", classes="view-title")
-        yield Button("▶ Start Test FL (2 rounds)", id="btn-start-federated-test", variant="warning")
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield ServerStatusPanel(self.server)
+        yield QuickActionsPanel(self.server)
         self.activity_feed = ActivityFeedPanel()
         yield self.activity_feed
+        footer = CustomFooter(id="custom-footer")
+        footer.current_view = "dashboard"
+        yield footer
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button clicks"""
@@ -227,12 +173,10 @@ class DashboardView(Vertical):
         if not self.server:
             return
         
-        # Get connected devices
         num_devices = len(self.server.state.connected_clients)
         if num_devices == 0:
             return
         
-        # Run federated learning in background thread so TUI doesn't freeze
         def run_federated():
             try:
                 self.server.start_federated_learning(max_rounds=2, expected_clients=num_devices)
