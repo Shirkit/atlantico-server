@@ -53,6 +53,8 @@ class LogHighlighter(Highlighter):
 class LogsScreen(Screen):
     """Logs viewer screen"""
     
+    AUTO_FOCUS = False
+    
     def __init__(self, server=None, log_file="run/logs/server.log"):
         super().__init__()
         self.server = server

@@ -151,11 +151,41 @@ ActivityFeedPanel #activity-log {
 /* ============================================ */
 /*  DEVICES SCREEN                             */
 /* ============================================ */
+#tables-container {
+    height: 1fr;
+}
+
+#tables-container > Container {
+    width: 1fr;
+    height: 100%;
+}
+
 #all-devices-table,
 #federated-devices-table {
     height: 1fr;
-    min-height: 10;
-    margin: 1 0;
+    min-height: 15;
+}
+
+.table-count {
+    dock: bottom;
+    height: 1;
+    width: auto;
+    
+    layer: above;
+    background: $background;
+    color: $text-muted;
+    padding: 0 1;
+    margin: 0 2;
+}
+
+#device-info-panel {
+    height: auto;
+    margin-top: 0;
+}
+
+#device-info-content {
+    padding: 0 1;
+    height: auto;
 }
 
 /* ============================================ */
@@ -163,7 +193,6 @@ ActivityFeedPanel #activity-log {
 /* ============================================ */
 
 ConfigurationPanel {
-    background: red;
     height: auto;
 }
 

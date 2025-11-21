@@ -142,6 +142,8 @@ class ActivityFeedPanel(Container):
 class DashboardScreen(Screen):
     """Dashboard screen"""
     
+    AUTO_FOCUS = False
+    
     def __init__(self, server=None):
         super().__init__()
         self.server = server

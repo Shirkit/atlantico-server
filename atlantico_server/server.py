@@ -212,22 +212,34 @@ class MQTTFederatedServer:
         elif command == "resume":
             self._handle_resume_command(client_id)
         elif command == "alive":
-            # In federated mode, only track already-joined devices (no auto-discovery)
-            if client_id in self.state.connected_clients:
-                self._handle_alive_command(client_id, auto_discover=False)
+            # Always track alive status for all devices, regardless of federation participation
+            self._handle_alive_command(client_id, auto_discover=True)
     
     def _handle_join_command(self, client_id):
-        """Handle client join requests"""
+        """Handle client join requests for federation"""
+        # Ensure device is tracked in connected_clients
         if client_id not in self.state.connected_clients:
             self.state.connected_clients[client_id] = {'last_seen': time.time()}
-            self.logger.info(f"Client {client_id} joined the server. "
-                      f"Total clients: {len(self.state.connected_clients)}")
+        else:
+            self.state.connected_clients[client_id]['last_seen'] = time.time()
+        
+        # Add to federated_clients if not already there (device wants to participate)
+        if client_id not in self.state.federated_clients:
+            self.state.federated_clients[client_id] = {
+                'round': self.state.current_round if self.state.current_round > 0 else 1,
+                'progress': 'Waiting',
+                'last_update': time.time()
+            }
+            self.logger.info(f"Client {client_id} joined federation. "
+                      f"Federated clients: {len(self.state.federated_clients)}")
     
     def _handle_leave_command(self, client_id):
-        """Handle client leave notifications"""
-        if client_id in self.state.connected_clients:
-            del self.state.connected_clients[client_id]
-            self.logger.info(f"Client {client_id} left the server")
+        """Handle client leave notifications from federation"""
+        # Remove from federated_clients but keep in connected_clients
+        if client_id in self.state.federated_clients:
+            del self.state.federated_clients[client_id]
+            self.logger.info(f"Client {client_id} left federation. "
+                      f"Federated clients: {len(self.state.federated_clients)}")
     
     def _handle_resume_command(self, client_id):
         """Handle client resume notifications"""
@@ -718,7 +730,7 @@ class MQTTFederatedServer:
         
         config.update({
             "neurons": total_neurons,
-            "device_count": len(self.state.connected_clients),
+            "device_count": len(self.state.federated_clients),
             "bits": "32",
             "run": "X",
         })
@@ -1026,7 +1038,8 @@ class MQTTFederatedServer:
                 self.state.federated_path = os.path.join(WEIGHTS_FOLDER, f"{timestamp}_{test_name}")
             self.state.current_round = 0
             self.state.is_federated = True
-            self.state.connected_clients.clear()
+            # Don't clear connected_clients - keep tracking all devices
+            # self.state.connected_clients.clear()
             
             # Extract configuration
             max_rounds = test_config.get('rounds', 1)  # Default to 1 round if not specified
@@ -1056,16 +1069,20 @@ class MQTTFederatedServer:
                 self._send_command(json.dumps(join_command, separators=(',', ':')))
                 sleep(COMMAND_RETRY_INTERVAL)
             
-            if len(self.state.connected_clients) < 1:
-                self.logger.error(f"Test {test_number}: No clients connected")
+            # Wait for devices to respond to join command (they'll populate federated_clients)
+            sleep(2)
+            
+            if len(self.state.federated_clients) < 1:
+                self.logger.error(f"Test {test_number}: No clients joined federation")
                 return False
             
-            if expected_clients and len(self.state.connected_clients) < expected_clients:
-                self.logger.error(f"Test {test_number}: {len(self.state.connected_clients)}/{expected_clients} clients (insufficient)")
+            if expected_clients and len(self.state.federated_clients) < expected_clients:
+                self.logger.error(f"Test {test_number}: {len(self.state.federated_clients)}/{expected_clients} clients joined (insufficient)")
                 self._send_unsubscribe_command()
                 return False
             
-            self.logger.info(f"Test {test_number} started with {len(self.state.connected_clients)} clients")
+            self.logger.info(f"Test {test_number} started with {len(self.state.federated_clients)} federated clients "
+                           f"({len(self.state.connected_clients)} total connected)")
             
             # Create start command with test-specific configuration
             start_command = {
@@ -1083,11 +1100,12 @@ class MQTTFederatedServer:
             
             self.state.max_rounds = max_rounds
             
-            # Initialize federated clients tracking (progress != 'Completed' means waiting)
-            self.state.federated_clients = {
-                client_id: {'round': 1, 'progress': 'Training', 'last_update': time.time()}
-                for client_id in self.state.connected_clients
-            }
+            # Update federated clients that joined to Training status
+            # Note: federated_clients is now populated by join commands, not copied from connected_clients
+            for client_id in self.state.federated_clients:
+                self.state.federated_clients[client_id]['round'] = 1
+                self.state.federated_clients[client_id]['progress'] = 'Training'
+                self.state.federated_clients[client_id]['last_update'] = time.time()
             
             self._send_command(json.dumps(start_command, separators=(',', ':')))
             

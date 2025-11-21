@@ -1,6 +1,8 @@
 """Main TUI Application"""
 
 import json
+import os
+from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Static
 from textual.containers import Container
@@ -11,6 +13,9 @@ from atlantico_server.server import (
     TOPIC_SEND_COMMANDS_TO_DEVICES,
     TOPIC_RECEIVE_COMMANDS_FROM_DEVICES
 )
+
+# Config file path
+TUI_CONFIG_FILE = "run/tui_config.json"
 
 
 class CustomFooter(Container):
@@ -69,8 +74,6 @@ class ServerApp(App):
     
     CSS_PATH = "styles/main.tcss"
     
-    ENABLE_COMMAND_PALETTE = False
-    
     def watch_css(self) -> bool:
         return True
     
@@ -80,6 +83,7 @@ class ServerApp(App):
         Binding("f", "show_federated", "Federate"),
         Binding("l", "show_logs", "Logs"),
         Binding("s", "show_settings", "Settings"),
+        Binding("escape", "unfocus", "Clear focus", show=False),
         Binding("q", "quit", "Quit", priority=True),
     ]
     
@@ -98,6 +102,32 @@ class ServerApp(App):
         }
         
         self._screens_installed = False
+        self._load_config()
+    
+    def _load_config(self) -> None:
+        """Load TUI configuration including theme preference"""
+        if os.path.exists(TUI_CONFIG_FILE):
+            try:
+                with open(TUI_CONFIG_FILE, 'r') as f:
+                    config = json.load(f)
+                    if 'theme' in config:
+                        self.theme = config['theme']
+            except Exception:
+                pass
+    
+    def _save_config(self) -> None:
+        """Save TUI configuration including theme preference"""
+        try:
+            os.makedirs(os.path.dirname(TUI_CONFIG_FILE), exist_ok=True)
+            config = {'theme': self.theme}
+            with open(TUI_CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+    
+    def watch_theme(self, theme: str) -> None:
+        """Save theme when it changes"""
+        self._save_config()
     
     def on_mount(self) -> None:
         """Called when app is mounted"""
@@ -162,3 +192,20 @@ class ServerApp(App):
     def action_show_settings(self) -> None:
         self.switch_screen("settings")
         self.update_header("Settings")
+    
+    def action_unfocus(self) -> None:
+        """Clear focus from all widgets"""
+        self.set_focus(None)
+    
+    def on_key(self, event) -> None:
+        """Handle tab cycling - clear focus when tabbing from last element"""
+        if event.key == "tab":
+            focused = self.focused
+            if focused is not None:
+                # Get all focusable widgets in the current screen
+                focusable = [w for w in self.screen.query("*") if w.focusable]
+                
+                if focusable and focused == focusable[-1]:
+                    # We're on the last focusable widget, clear focus instead of cycling
+                    event.prevent_default()
+                    self.set_focus(None)

@@ -116,17 +116,19 @@ class ProgressPanel(Container):
         training_widget = self.query_one("#training-status", Static)
         progress_bar = self.query_one("#round-progress", ProgressBar)
         
+        connected = len(state.connected_clients)
         if self.max_rounds > 0 and self.current_round > 0:
             status_widget.update(f"Round {self.current_round} of {self.max_rounds}")
             progress_percent = int((self.current_round / self.max_rounds) * 100)
             progress_bar.update(progress=progress_percent)
+            connected = len(state.federated_clients)
         else:
             status_widget.update("Not started")
             progress_bar.update(progress=0)
         
-        # Device progress
-        connected = len(state.connected_clients)
         device_widget.update(f"Connected Devices: {connected}")
+        
+        # Device progress
         
         # Training status
         if state.is_federated:
@@ -161,6 +163,8 @@ class MetricsPanel(Container):
 class FederatedScreen(Screen):
     """Federated learning screen"""
     
+    AUTO_FOCUS = False
+    
     def __init__(self, server=None, config=None):
         super().__init__()
         self.server = server
@@ -186,10 +190,6 @@ class FederatedScreen(Screen):
         footer = CustomFooter(id="custom-footer")
         footer.current_view = "federated"
         yield footer
-    
-    def on_mount(self) -> None:
-        """Prevent auto-focus on inputs when screen loads"""
-        self.screen.focus()
     
     def on_input_changed(self, event: Input.Changed) -> None:
         """Save config values as they change"""

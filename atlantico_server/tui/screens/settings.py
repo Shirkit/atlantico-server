@@ -12,6 +12,8 @@ from atlantico_server.tui.app import CustomFooter
 class SettingsScreen(Screen):
     """Settings screen"""
     
+    AUTO_FOCUS = False
+    
     def __init__(self, server=None):
         super().__init__()
         self.server = server
