@@ -7,7 +7,6 @@ duplication; use `python server.py` from the repo root or run
 """
 
 import json
-import logging
 import paho.mqtt.client as mqtt
 from datetime import datetime
 from time import sleep
@@ -22,7 +21,7 @@ import argparse
 import sys
 from .parser import do_parse, plot_batch_comparison
 from .reader import read_nn_binary_with_activation
-from .logging import setup_logging, get_logger
+from .logging import setup_logging
 
 # Global configuration constants
 BROKER_IP = os.getenv("MQTT_BROKER_HOST", "127.0.0.1")
@@ -46,7 +45,7 @@ WEIGHTS_FOLDER = "weights/"
 METRICS_FOLDER = "metrics/"
 
 # Federated learning configuration
-DEFAULT_LAYERS = [3, 400, 300, 200, 100, 6]
+DEFAULT_LAYERS = [32, 200, 100, 50, 25, 18]
 DEFAULT_ACTIVATION_FUNCTIONS = [1, 1, 1, 1, 6]
 #DEFAULT_LAYERS = [3, 2000, 1100, 600, 330, 200, 120, 60, 30, 15, 6]
 #DEFAULT_ACTIVATION_FUNCTIONS = [1, 1, 1, 1, 1, 1, 1, 1, 1, 6]
@@ -61,7 +60,7 @@ DEFAULT_SEND_JSON_WEIGHTS = False
 # Timing constants
 CONNECTION_WAIT_TIME = 10
 COMMAND_RETRY_INTERVAL = 3
-COMMAND_RETRIES = 1
+COMMAND_RETRIES = 3
 STATUS_UPDATE_INTERVAL = 30
 
 
@@ -71,6 +70,7 @@ class FederatedServerState:
     def __init__(self):
         self.is_federated = False
         self.federated_path = ""
+        self.batch_base_path = ""
         self.current_round = 0
         self.max_rounds = 0
         self.connected_clients = {}  # {device_id: {'last_seen': timestamp}}
@@ -79,6 +79,11 @@ class FederatedServerState:
         self.is_paused = False
         self.paused_aggregated_path: str | None = None  # Store path to aggregated weights when paused
         self.stop_requested = False  # Flag to gracefully stop federated learning
+        
+        # Batch progress tracking
+        self.current_test_index = 0
+        self.total_tests = 0
+        self.current_test_name = ""
     
     @property
     def waiting_for_clients(self):
@@ -97,6 +102,9 @@ class FederatedServerState:
         self.is_paused = False
         self.paused_aggregated_path = None
         self.stop_requested = False
+        self.current_test_index = 0
+        self.total_tests = 0
+        self.current_test_name = ""
 
 
 class MQTTFederatedServer:
@@ -881,6 +889,7 @@ class MQTTFederatedServer:
         batch_folder_name = f"batch_{batch_timestamp}"
         batch_base_path = os.path.join(WEIGHTS_FOLDER, batch_folder_name)
         os.makedirs(batch_base_path, exist_ok=True)
+        self.state.batch_base_path = batch_base_path
         
         self.logger.info(f"Batch folder: {batch_base_path}")
         
@@ -895,11 +904,17 @@ class MQTTFederatedServer:
         
         self.logger.info(f"Starting batch processing of {len(batch_config)} configurations")
         
+        # Update state with batch info
+        self.state.total_tests = len(batch_config)
+        
         # Process each test configuration sequentially
         successful_tests = 0
         failed_tests = 0
         
         for test_index, test_config in enumerate(batch_config):
+            self.state.current_test_index = test_index + 1
+            self.state.current_test_name = test_config.get('name', f'Test {test_index + 1}')
+            
             self.logger.info(f"\n{'='*60}")
             self.logger.info(f"STARTING TEST {test_index + 1} of {len(batch_config)}")
             self.logger.info(f"{'='*60}")

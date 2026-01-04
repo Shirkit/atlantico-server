@@ -82,7 +82,7 @@ class QuickActionsPanel(Container):
         yield Horizontal(
             Button("Check Devices", id="btn-check-devices"),
             Button("View Logs", id="btn-view-logs"),
-            Button("Start Training", id="btn-start-federated-test")
+            Button("Start Federation", id="btn-start-federated-test")
         )
 
 
@@ -166,25 +166,4 @@ class DashboardScreen(Screen):
         elif event.button.id == "btn-view-logs":
             self.app.action_show_logs()
         elif event.button.id == "btn-start-federated-test":
-            self.start_test_federated_learning()
-    
-    def start_test_federated_learning(self):
-        """Temporary function to test federated learning from TUI"""
-        import threading
-        
-        if not self.server:
-            return
-        
-        num_devices = len(self.server.state.connected_clients)
-        if num_devices == 0:
-            return
-        
-        def run_federated():
-            try:
-                self.server.start_federated_learning(max_rounds=2, expected_clients=num_devices)
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-        
-        thread = threading.Thread(target=run_federated, daemon=True)
-        thread.start()
+            self.app.action_show_federated()

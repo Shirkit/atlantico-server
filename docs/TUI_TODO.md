@@ -1,6 +1,6 @@
 # Atlantico Server TUI - TODO List
 
-## Current Status: Phases 1-5 Complete ✅
+## Current Status: Phases 1-5.5 Complete ✅
 
 ### Completed ✅
 
@@ -105,56 +105,61 @@
 
 ## In Progress ⏳
 
-*No active work in progress - ready for Phase 6*
-
----
-
-## Upcoming 📋
-
 ### Phase 5.6: Additional UI Polish
 **Priority:** Medium  
 **Estimated Effort:** 4-5 hours
 
-#### Device Monitor Polish
-- [ ] Improve table appearance
-  - [ ] Better column widths
-  - [ ] Alternate row colors (already done via CSS)
-  - [ ] Status icons instead of text (● / ○)
-- [ ] Add summary statistics panel
-  - [ ] Total devices / Active / Inactive counts
-  - [ ] Average accuracy across devices
-  - [ ] Visual indicators
-- [ ] Better state transitions
-  - [ ] Smooth updates without flicker
+#### Device Monitor Polish ✅
+- [x] Improve table appearance
+  - [x] Better column widths
+  - [x] Alternate row colors (already done via CSS)
+  - [x] Status icons instead of text (● / ○)
+- [x] Add summary statistics panel
+  - [x] Total devices / Active / Inactive counts
+  - [x] Average accuracy across devices
+  - [x] Visual indicators
+- [x] Better state transitions
+  - [x] Smooth updates without flicker
 
 #### Federated Learning Screen Polish
-- [ ] Improve configuration panel
-  - [ ] Better input field styling (already decent)
-  - [ ] Input validation feedback (red border on invalid)
-  - [ ] Help text for each field
-- [ ] Enhance progress display
-  - [ ] Styled progress bar with colors
-  - [ ] Better round counter layout
-  - [ ] Status badges instead of plain text
-- [ ] Polish control buttons
-  - [ ] Add icons/emojis to buttons (▶ ⏹ ⏸)
-- [ ] Metrics panel improvements
-  - [ ] Chart-like visual for history
-  - [ ] Color-coded improvements/declines
-  - [ ] Better number formatting (2 decimal places)
+- [x] Refactor Layout
+  - [x] Move Config and Controls to bottom (side-by-side)
+  - [x] Remove Metrics Panel (moving to separate screen)
+  - [x] Expand Progress Panel to fill top space
+- [x] Improve Configuration Panel
+  - [x] Remove Rounds and Epochs inputs (read from config)
+  - [x] Keep Clients and Batch inputs
+- [x] Enhance Progress Display
+  - [x] Implement 3-level progress bars (Tests, Rounds, Clients)
+  - [x] Use X/Y format instead of percentage
+  - [x] Show Test progress (Current/Total tests)
+  - [x] Show Round progress (Current/Total rounds)
+  - [x] Show Client progress (Finished/Total clients)
 
-#### Logs Screen Polish
-- [ ] Improve log display
-  - [ ] Better syntax highlighting for log levels
-  - [ ] Cleaner timestamp format
-  - [ ] Level badges/pills instead of emojis
-- [ ] Add filter UI
-  - [ ] Level selector buttons (INFO/DEBUG/WARNING/ERROR)
-  - [ ] Search input field
-  - [ ] Clear/export buttons
-- [ ] Better scrolling behavior
-  - [ ] Auto-scroll toggle
-  - [ ] Jump to top/bottom
+#### Logs Screen Polish ✅
+- [x] Improve log display
+  - [x] Better syntax highlighting for log levels
+  - [x] Cleaner timestamp format (with date toggle)
+  - [x] Level badges/pills instead of emojis
+- [x] Add filter UI
+  - [x] Level selector buttons (INFO/DEBUG/WARNING/ERROR)
+  - [x] Search input field
+  - [x] Clear/export buttons (Clear in Settings)
+- [x] Better scrolling behavior
+  - [x] Auto-scroll toggle
+  - [x] Jump to top/bottom (Not needed)
+
+#### Metrics Screen ✅
+- [x] Create Metrics Screen
+  - [x] Integrated with parser.py to load JSON data
+  - [x] DataTable for detailed metrics (Round, Client, Accuracy, Loss, F1, Time)
+  - [x] Summary panel (Total Rounds, Best Accuracy, Avg Time)
+  - [x] "Refresh Data" button for manual updates
+  - [x] Added to navigation (Footer, Keybinding 'm')
+
+---
+
+## Upcoming 📋
 
 ### Phase 6: Settings Screen
 **Priority:** Medium  
@@ -407,8 +412,8 @@ atlantico-server/
 
 ---
 
-**Last Updated:** November 15, 2025  
-**Current Phase:** Phases 1-5.5 complete (including system-wide logging refactoring + UI architecture overhaul), ready for Phase 6 (Settings Screen)
+**Last Updated:** December 10, 2025  
+**Current Phase:** Phases 1-5.7 complete, ready for Phase 6 (Settings Screen)
 
 ### Recent Commits
 - `c51fdf3` - refactor(server): modernize logging system and remove CLI menu

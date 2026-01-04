@@ -26,8 +26,8 @@ class EmojiFormatter(logging.Formatter):
     """Formatter that adds emoji indicators based on log level"""
     
     def format(self, record):
-        # Format: [HH:MM:SS.mmm] (LEVEL) message (with milliseconds)
-        timestamp = self.formatTime(record, '%H:%M:%S')
+        # Format: [YYYY-MM-DD HH:MM:SS.mmm] (LEVEL) message (with milliseconds)
+        timestamp = self.formatTime(record, '%Y-%m-%d %H:%M:%S')
         # Add milliseconds
         timestamp_with_ms = f"{timestamp}.{int(record.msecs):03d}"
         level = record.levelname
@@ -48,12 +48,16 @@ def setup_logging(debug: bool = False, enable_stdout: bool = True) -> logging.Lo
     # Get or create the server logger
     logger = logging.getLogger('atlantico_server')
     
-    # Set level based on debug flag
-    logger.setLevel(logging.DEBUG if debug else logging.INFO)
-    
     # Prevent duplicate handlers
     if logger.handlers:
+        # If we are requesting debug, ensure level is debug even if previously set to info
+        if debug:
+            logger.setLevel(logging.DEBUG)
         return logger
+
+    # Set level based on debug flag
+    logger.setLevel(logging.DEBUG if debug else logging.INFO)
+
     
     # Always create file handler (TUI will tail this file)
     try:

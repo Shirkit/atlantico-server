@@ -1,3 +1,6 @@
 {
-  "theme": "textual-dark"
+  "theme": "textual-dark",
+  "display_config": {
+    "show_date": false
+  }
 }

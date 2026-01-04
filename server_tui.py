@@ -66,8 +66,9 @@ def main():
     dev_mode = '--dev' in sys.argv
     
     # Setup logging for TUI mode (file only, no stdout to avoid interfering with TUI)
-    setup_logging(debug=False, enable_stdout=False)
+    setup_logging(debug=True, enable_stdout=False)
     
+    logger.info("--- Atlantico Server TUI Mode ---")
     logger.info("Initializing Atlantico Server")
     
     # Generate sample logs for testing
@@ -77,6 +78,9 @@ def main():
     server = None
     try:
         server = MQTTFederatedServer(debug=False, enable_stdout=False)
+        # from atlantico_server.parser import plot_batch_comparison
+        # plot_batch_comparison("/home/shirkit/Projects/atlantico-server/weights/batch_2025-12-29_12-34-23")
+        # server.parse_all_training_data("/home/shirkit/Projects/atlantico-server/weights/batch_2025-12-29_12-34-23")
         
         # Start MQTT loop in background
         server.client.loop_start()
@@ -103,7 +107,7 @@ def main():
 
 def create_app():
     """Factory function for textual run command"""
-    setup_logging(debug=False, enable_stdout=False)
+    setup_logging(debug=True, enable_stdout=False)
     
     server = None
     try:

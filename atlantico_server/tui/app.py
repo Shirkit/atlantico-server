@@ -40,6 +40,7 @@ class CustomFooter(Container):
             "dashboard": ("d", "Dashboard"),
             "devices": ("v", "Devices"), 
             "federated": ("f", "Federate"),
+            "metrics": ("m", "Metrics"),
             "logs": ("l", "Logs"),
             "settings": ("s", "Settings")
         }
@@ -68,6 +69,10 @@ class BaseScreen(Screen):
         yield Header()
         yield CustomFooter(id="custom-footer")
 
+        footer = CustomFooter(id="custom-footer")
+        
+        yield footer
+
 
 class ServerApp(App):
     """Atlantico Federated Learning Server TUI"""
@@ -81,6 +86,7 @@ class ServerApp(App):
         Binding("d", "show_dashboard", "Dashboard"),
         Binding("v", "show_devices", "Devices"),
         Binding("f", "show_federated", "Federate"),
+        Binding("m", "show_metrics", "Metrics"),
         Binding("l", "show_logs", "Logs"),
         Binding("s", "show_settings", "Settings"),
         Binding("escape", "unfocus", "Clear focus", show=False),
@@ -93,12 +99,9 @@ class ServerApp(App):
         self.title = "Atlantico Federated Learning Server"
         self.sub_title = ""
         
-        # Store federated learning config values
-        self.federated_config = {
-            "rounds": "10",
-            "epochs": "5",
-            "clients": "4",
-            "batch": "batch-config/batch.json"
+        # Store display settings
+        self.display_config = {
+            "show_date": False
         }
         
         self._screens_installed = False
@@ -112,6 +115,8 @@ class ServerApp(App):
                     config = json.load(f)
                     if 'theme' in config:
                         self.theme = config['theme']
+                    if 'display_config' in config:
+                        self.display_config = config['display_config']
             except Exception:
                 pass
     
@@ -119,7 +124,11 @@ class ServerApp(App):
         """Save TUI configuration including theme preference"""
         try:
             os.makedirs(os.path.dirname(TUI_CONFIG_FILE), exist_ok=True)
-            config = {'theme': self.theme}
+            config = {
+                'theme': self.theme,
+                'display_config': self.display_config
+
+            }
             with open(TUI_CONFIG_FILE, 'w') as f:
                 json.dump(config, f, indent=2)
         except Exception:
@@ -149,12 +158,14 @@ class ServerApp(App):
         from .screens.dashboard import DashboardScreen
         from .screens.devices import DevicesScreen
         from .screens.federated import FederatedScreen
+        from .screens.metrics import MetricsScreen
         from .screens.logs import LogsScreen
         from .screens.settings import SettingsScreen
         
         self.install_screen(DashboardScreen(self.server), name="dashboard")
         self.install_screen(DevicesScreen(self.server), name="devices")
-        self.install_screen(FederatedScreen(self.server, self.federated_config), name="federated")
+        self.install_screen(FederatedScreen(self.server), name="federated")
+        self.install_screen(MetricsScreen(self.server), name="metrics")
         self.install_screen(LogsScreen(self.server), name="logs")
         self.install_screen(SettingsScreen(self.server), name="settings")
         
@@ -165,7 +176,7 @@ class ServerApp(App):
         if not self.server or not self.server.client.is_connected():
             return
         
-        alive_command = {"command": "alive"}
+        alive_command = {"command": "federate_alive"}
         command_json = json.dumps(alive_command, separators=(',', ':'))
         self.server.client.publish(TOPIC_SEND_COMMANDS_TO_DEVICES, command_json)
     
@@ -184,6 +195,10 @@ class ServerApp(App):
     def action_show_federated(self) -> None:
         self.switch_screen("federated")
         self.update_header("Federated Learning")
+    
+    def action_show_metrics(self) -> None:
+        self.switch_screen("metrics")
+        self.update_header("Metrics")
     
     def action_show_logs(self) -> None:
         self.switch_screen("logs")

@@ -2,8 +2,8 @@
 
 from textual.app import ComposeResult
 from textual.screen import Screen
-from textual.widgets import Static, RichLog, Header
-from textual.containers import Container, Vertical, ScrollableContainer
+from textual.widgets import Static, RichLog, Header, Input, Checkbox, Select, Label
+from textual.containers import Container, Vertical, ScrollableContainer, Horizontal
 from rich.highlighter import Highlighter, ReprHighlighter
 from rich.text import Text
 import re, os, sys
@@ -20,7 +20,8 @@ class LogHighlighter(Highlighter):
     
     # Define regex patterns for highlighting
     highlights = [
-        r"(?P<timestamp>\[\d{2}:\d{2}:\d{2}(?:\.\d{3})?\])",  # Matches [HH:MM:SS] or [HH:MM:SS.mmm]
+        r"(?P<timestamp>\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{3})?\])",  # Matches [YYYY-MM-DD HH:MM:SS.mmm]
+        r"(?P<timestamp_short>\[\d{2}:\d{2}:\d{2}(?:\.\d{3})?\])",  # Matches [HH:MM:SS.mmm]
         r"(?P<debug>\(DEBUG\))",
         r"(?P<info>\(INFO\))",
         r"(?P<warning>\(WARNING\))",
@@ -31,6 +32,7 @@ class LogHighlighter(Highlighter):
     # Style mapping for log groups
     STYLES = {
         "timestamp": "bright_black",
+        "timestamp_short": "bright_black",
         "debug": "dim cyan",
         "info": "green",
         "warning": "yellow",
@@ -62,12 +64,28 @@ class LogsScreen(Screen):
         self.last_position = 0
         self.line_count = 0
         self._refresh_timer = None
+        self._last_filter_level = "ALL"
+        self._last_search_term = ""
+        self._last_show_date = False
     
     def compose(self) -> ComposeResult:
         yield Header()
         
         log_container = Container(
-            Static(f"Tailing {self.log_file} (auto-refreshes every 0.5s)", id="log-count"),
+            # Header controls
+            Horizontal(
+                Static("", id="log-count"),
+                Checkbox("Auto Scroll", value=True, id="log-autoscroll"),
+                Select(
+                    [("Default", "NOT_DEBUG"), ("All Levels", "ALL"), ("Debug", "DEBUG"), ("Info", "INFO"), ("Warning", "WARNING"), ("Error", "ERROR"), ("Critical", "CRITICAL")],
+                    value="NOT_DEBUG",
+                    id="log-level-filter",
+                    allow_blank=False,
+                    compact=True
+                ),
+                Input(placeholder="Search logs...", id="log-search"),
+                id="log-header"
+            ),
             RichLog(id="log-display", highlight=True, markup=True),
             classes="panel"
         )
@@ -82,7 +100,7 @@ class LogsScreen(Screen):
         """Setup log refresh"""
         log_widget = self.query_one("#log-display", RichLog)
         log_widget.highlighter = LogHighlighter()
-        log_widget.auto_scroll = False
+        log_widget.auto_scroll = False  # We handle scrolling manually
  
     def on_show(self):
         """Start refreshing when screen becomes visible"""
@@ -93,11 +111,89 @@ class LogsScreen(Screen):
         """Stop refreshing when screen is hidden"""
         if self._refresh_timer:
             self._refresh_timer.stop()
+            
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Handle search input change"""
+        if event.input.id == "log-search":
+            self.refresh_logs(force_reload=True)
+            
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Handle level filter change"""
+        if event.select.id == "log-level-filter":
+            self.refresh_logs(force_reload=True)
     
-    def refresh_logs(self, scroll_end: bool = True):
+    def refresh_logs(self, force_reload: bool = False):
         """Tail the log file and display new lines"""
         log_widget = self.query_one("#log-display", RichLog)
         count_widget = self.query_one("#log-count", Static)
+        search_input = self.query_one("#log-search", Input)
+        level_select = self.query_one("#log-level-filter", Select)
+        autoscroll_cb = self.query_one("#log-autoscroll", Checkbox)
+        
+        # Get current settings
+        search_term = search_input.value.lower()
+        filter_level = level_select.value
+        show_date = self.app.display_config.get("show_date", False)
+        
+        # Check if we need to reload everything
+        if (force_reload or 
+            search_term != self._last_search_term or 
+            filter_level != self._last_filter_level or
+            show_date != self._last_show_date):
+            
+            log_widget.clear()
+            self.last_position = 0
+            self.line_count = 0
+            self._last_search_term = search_term
+            self._last_filter_level = filter_level
+            self._last_show_date = show_date
+        
+        if not os.path.exists(self.log_file):
+            return
+            
+        try:
+            # Check if file was rotated or truncated
+            current_size = os.path.getsize(self.log_file)
+            if current_size < self.last_position:
+                self.last_position = 0
+                log_widget.clear()
+                self.line_count = 0
+            
+            with open(self.log_file, "r", encoding="utf-8") as f:
+                f.seek(self.last_position)
+                new_lines = f.readlines()
+                self.last_position = f.tell()
+                
+                for line in new_lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                        
+                    # Apply level filter
+                    if filter_level != "ALL":
+                        if filter_level == "NOT_DEBUG":
+                            if "(DEBUG)" in line:
+                                continue
+                        else:
+                            if f"({filter_level})" not in line:
+                                continue
+                            
+                    # Apply search filter
+                    if search_term and search_term not in line.lower():
+                        continue
+                    
+                    # Handle date display
+                    if not show_date:
+                        # Replace [YYYY-MM-DD HH:MM:SS.mmm] with [HH:MM:SS.mmm]
+                        line = re.sub(r"^\[\d{4}-\d{2}-\d{2} ", "[", line)
+                    
+                    log_widget.write(line, scroll_end=autoscroll_cb.value)
+                    self.line_count += 1
+                    
+            count_widget.update(f"Lines: {self.line_count}")
+                
+        except Exception as e:
+            count_widget.update(f"Error reading logs: {str(e)}")
         
         if not os.path.exists(self.log_file):
             if self.line_count == 0:
@@ -117,7 +213,7 @@ class LogsScreen(Screen):
                         self.line_count += 1
                     
                     self.last_position = f.tell()
-                    count_widget.update(f"Tailing {self.log_file} - Total lines: {self.line_count}")
+                    count_widget.update(f"{self.log_file} - {self.line_count} lines")
         except Exception as e:
             if self.line_count == 0:
                 log_widget.write(f"Error reading log file: {e}")

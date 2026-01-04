@@ -2,13 +2,18 @@
 
 from textual.app import ComposeResult
 from textual.screen import Screen
-from textual.widgets import Static, Button, Label, Input, ProgressBar, Header
+from textual.widgets import Static, Button, Label, Input, ProgressBar, Header, DirectoryTree
 from textual.containers import Container, Vertical, Horizontal, VerticalScroll
 from textual.reactive import reactive
+from typing import Iterable
+from pathlib import Path
 import threading, sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from atlantico_server.tui.app import CustomFooter
 
+class FilteredDirectoryTree(DirectoryTree):
+    def filter_paths(self, paths: Iterable[Path]) -> Iterable[Path]:
+        return [path for path in paths if path.is_dir() or path.name.endswith("json")]
 
 class ConfigurationPanel(Container):
     """Panel for training configuration"""
@@ -21,14 +26,6 @@ class ConfigurationPanel(Container):
     
     def compose(self):
         yield Horizontal(
-            Label("Rounds:", classes="config-label"),
-            Input(value=self.config.get("rounds"), placeholder="Number of rounds", id="input-rounds", classes="config-input"),
-        )
-        yield Horizontal(
-            Label("Epochs:", classes="config-label"),
-            Input(value=self.config.get("epochs"), placeholder="Epochs per device", id="input-epochs", classes="config-input"),
-        )
-        yield Horizontal(
             Label("Clients:", classes="config-label"),
             Input(value=self.config.get("clients"), placeholder="Number of devices", id="input-clients", classes="config-input"),
         )
@@ -36,8 +33,12 @@ class ConfigurationPanel(Container):
             Label("Batch:", classes="config-label"),
             Input(value=self.config.get("batch"), placeholder="Path", id="input-batch", classes="config-input"),
         )
+        yield FilteredDirectoryTree(id="batch-file-tree", classes="file-tree", path="./")
 
-
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        """Handle file selection from directory tree"""
+        batch_input = self.query_one("#input-batch", Input)
+        batch_input.value = str(event.path)
 class TrainingControlPanel(Container):
     """Panel for training control buttons"""
     
@@ -77,7 +78,6 @@ class TrainingControlPanel(Container):
             pause_btn.label = "⏸ Pause"
             pause_btn.variant = "warning"
 
-
 class ProgressPanel(Container):
     """Panel showing training progress"""
     
@@ -92,13 +92,20 @@ class ProgressPanel(Container):
         self.border_title = "Training Progress"
     
     def compose(self):
-        yield Static("Not started", id="progress-status")
-        yield ProgressBar(total=100, show_eta=False, id="round-progress")
-        yield Static("Devices: 0/0 completed", id="device-progress")
-        yield Static("Status: Idle", id="training-status")
+        yield Static("", id="training-status")
+
+        yield Static("", id="test-count", classes="progress-count")
+        yield ProgressBar(total=0, show_eta=False, id="test-progress", classes="progress-bar", show_percentage=False)
+
+        yield Static("", id="round-count", classes="progress-count")
+        yield ProgressBar(total=0, show_eta=False, id="round-progress", classes="progress-bar", show_percentage=False)
+
+        yield Static("", id="client-count", classes="progress-count")
+        yield ProgressBar(total=0, show_eta=False, id="client-progress", classes="progress-bar", show_percentage=False)
     
     def on_mount(self):
         """Setup auto-refresh"""
+        self.refresh_progress()
         self.set_interval(1.0, self.refresh_progress)
     
     def refresh_progress(self):
@@ -107,57 +114,64 @@ class ProgressPanel(Container):
             return
         
         state = self.server.state
-        self.current_round = state.current_round
-        self.max_rounds = state.max_rounds if state.max_rounds > 0 else 10
         
-        # Update text widgets
-        status_widget = self.query_one("#progress-status", Static)
-        device_widget = self.query_one("#device-progress", Static)
-        training_widget = self.query_one("#training-status", Static)
-        progress_bar = self.query_one("#round-progress", ProgressBar)
-        
-        connected = len(state.connected_clients)
-        if self.max_rounds > 0 and self.current_round > 0:
-            status_widget.update(f"Round {self.current_round} of {self.max_rounds}")
-            progress_percent = int((self.current_round / self.max_rounds) * 100)
-            progress_bar.update(progress=progress_percent)
-            connected = len(state.federated_clients)
-        else:
-            status_widget.update("Not started")
-            progress_bar.update(progress=0)
-        
-        device_widget.update(f"Connected Devices: {connected}")
-        
-        # Device progress
-        
-        # Training status
+        try:
+            training_widget = self.query_one("#training-status", Static)
+            
+            test_bar = self.query_one("#test-progress", ProgressBar)
+            test_count = self.query_one("#test-count", Static)
+            
+            round_bar = self.query_one("#round-progress", ProgressBar)
+            round_count = self.query_one("#round-count", Static)
+            
+            client_bar = self.query_one("#client-progress", ProgressBar)
+            client_count = self.query_one("#client-count", Static)
+        except Exception:
+            return
+            
+        # Update Training Status
         if state.is_federated:
             if state.is_paused:
-                training_widget.update("Status: ⏸️ Paused (aggregating)")
+                training_widget.update("Status: Paused (aggregating)")
             else:
-                training_widget.update("Status: 🔄 Training in progress...")
+                training_widget.update("Status: Training in progress...")
         else:
-            training_widget.update("Status: ⏸ Idle")
-
-
-class MetricsPanel(Container):
-    """Panel showing training metrics"""
-    
-    def __init__(self, server=None):
-        super().__init__(classes="panel")
-        self.server = server
-        self.border_title = "Metrics"
-    
-    def compose(self):
-        yield Static("No metrics yet", id="metrics-display")
-    
-    def update_metrics(self, accuracy: float = 0.0, loss: float = 0.0):
-        """Update displayed metrics"""
-        metrics_widget = self.query_one("#metrics-display", Static)
-        metrics_widget.update(
-            f"Global Accuracy: {accuracy:.2%}\n"
-            f"Global Loss: {loss:.4f}"
-        )
+            training_widget.update("Status: Not Running")
+            
+        # Update Test Progress
+        current_test = getattr(state, 'current_test_index', 0)
+        total_tests = getattr(state, 'total_tests', 0)
+        test_name = getattr(state, 'current_test_name', '')
+        
+        if total_tests > 0:
+            test_count.update(f"Tests Run: {current_test}/{total_tests} ({test_name})")
+            test_bar.update(progress=current_test, total=total_tests)
+        else:
+            test_bar.update(progress=0)
+            test_count.update("Tests Run: -/-")
+            
+        # Update Round Progress
+        current_round = state.current_round
+        max_rounds = state.max_rounds if state.max_rounds > 0 else 0
+        
+        if state.is_federated and max_rounds > 0:
+            round_bar.update(progress=current_round, total=max_rounds)
+            round_count.update(f"Rounds Completed: {current_round}/{max_rounds}")
+        else:
+            round_bar.update(progress=0)
+            round_count.update("Rounds Completed: -/-")
+            
+        # Update Client Progress
+        total_clients = len(state.federated_clients)
+        waiting_clients = len(state.waiting_for_clients)
+        completed_clients = total_clients - waiting_clients
+        
+        if total_clients > 0:
+            client_bar.update(progress=completed_clients, total=total_clients)
+            client_count.update(f"Current Round: {completed_clients}/{total_clients}")
+        else:
+            client_bar.update(progress=0)
+            client_count.update("Current Round: -/-")
 
 
 class FederatedScreen(Screen):
@@ -172,7 +186,6 @@ class FederatedScreen(Screen):
         self.config_panel = None
         self.control_panel = None
         self.progress_panel = None
-        self.metrics_panel = None
     
     def compose(self) -> ComposeResult:
         yield Header()
@@ -180,12 +193,16 @@ class FederatedScreen(Screen):
         self.config_panel = ConfigurationPanel(self.server, self.config)
         self.control_panel = TrainingControlPanel(self.server)
         self.progress_panel = ProgressPanel(self.server)
-        self.metrics_panel = MetricsPanel(self.server)
         
-        yield self.config_panel
-        yield self.control_panel
-        yield self.progress_panel
-        yield self.metrics_panel
+        yield Vertical(
+            self.progress_panel,
+            Horizontal(
+                self.config_panel,
+                self.control_panel,
+                classes="bottom-controls"
+            ),
+            classes="main-layout"
+        )
         
         footer = CustomFooter(id="custom-footer")
         footer.current_view = "federated"
@@ -193,11 +210,7 @@ class FederatedScreen(Screen):
     
     def on_input_changed(self, event: Input.Changed) -> None:
         """Save config values as they change"""
-        if event.input.id == "input-rounds":
-            self.config["rounds"] = event.value
-        elif event.input.id == "input-epochs":
-            self.config["epochs"] = event.value
-        elif event.input.id == "input-clients":
+        if event.input.id == "input-clients":
             self.config["clients"] = event.value
         elif event.input.id == "input-batch":
             self.config["batch"] = event.value
@@ -218,18 +231,18 @@ class FederatedScreen(Screen):
         
         # Get configuration values
         try:
-            rounds_input = self.query_one("#input-rounds", Input)
-            epochs_input = self.query_one("#input-epochs", Input)
             clients_input = self.query_one("#input-clients", Input)
             batch_input = self.query_one("#input-batch", Input)
             
-            rounds = int(rounds_input.value) if rounds_input.value else 10
-            epochs = int(epochs_input.value) if epochs_input.value else 5
-            clients = int(clients_input.value) if clients_input.value else 4
+            clients = int(clients_input.value) if clients_input.value else None
             batch_file = batch_input.value if batch_input.value else None
             
         except ValueError:
             # Invalid input - could show error message
+            return
+        
+        if not clients or not batch_file:
+            self.app.notify("Please provide valid number of clients and batch file path.", severity="error")
             return
         
         # Update button states
@@ -241,7 +254,8 @@ class FederatedScreen(Screen):
                 if batch_file:
                     self.server.start_batch_federated_learning(batch_file, expected_clients=clients)
                 else:
-                    self.server.start_federated_learning(max_rounds=rounds, expected_clients=clients)
+                    # Default to 10 rounds if no batch file provided
+                    self.server.start_federated_learning(max_rounds=10, expected_clients=clients)
             except Exception as e:
                 import traceback
                 traceback.print_exc()

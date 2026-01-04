@@ -9,6 +9,7 @@ seaborn>=0.12.0
 
 # Terminal UI framework
 textual>=0.47.0
+textual_plotext
 
 # Optional (used by some scripts if present):
 # pandas>=1.5.0

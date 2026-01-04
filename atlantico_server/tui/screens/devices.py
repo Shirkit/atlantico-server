@@ -75,6 +75,7 @@ class DevicesScreen(Screen):
         fed_table = self.query_one("#federated-devices-table", DataTable)
         fed_table.add_column("Device ID", key="device_id")
         fed_table.add_column("Round", key="round")
+        fed_table.add_column("Progress", key="progress")
         fed_table.add_column("Status", key="status")
         fed_table.cursor_type = "row"
             
@@ -247,12 +248,15 @@ class DevicesScreen(Screen):
     def on_show(self):
         """Start refreshing when screen becomes visible"""
         self.refresh_devices()
-        self._refresh_timer = self.set_interval(1.0, self.refresh_devices)
+        if not self._refresh_timer:
+            self._refresh_timer = self.set_interval(1.0, self.refresh_devices)
+        else:
+            self._refresh_timer.resume()
     
     def on_hide(self):
         """Stop refreshing when screen is hidden"""
         if self._refresh_timer:
-            self._refresh_timer.stop()
+            self._refresh_timer.pause()
     
     def refresh_devices(self):
         """Refresh device lists from server state"""

@@ -48,14 +48,14 @@ def do_parse(parse_folder, metrics_folder):
         logger.warning("No JSON files found in parse folder")
         return
 
-    logger.debug(f"Found {len(found_files)} JSON files")
+    logger.info(f"Found {len(found_files)} JSON files")
 
     json_data = _load_json_data(found_files)
     if not json_data:
         logger.warning("No valid data was loaded")
         return
 
-    logger.debug("Data parsed successfully")
+    logger.info("Data parsed successfully")
     if metrics_folder and not os.path.exists(metrics_folder):
         os.makedirs(metrics_folder)
     
@@ -98,13 +98,13 @@ def _load_json_data(found_files):
                 data["round"] = int(round_match.group(1)) if round_match else 6
                 
                 # Flatten data structure for easier access
-                data["metrics"] = data["data"]["metrics"]
-                data["client"] = data["data"]["client"]
-                data["timings"] = data["data"]["timings"]
-                data["dataset_size"] = data["data"]["datasetSize"]
-                data["model"] = data["data"]["model"]
-                data["epochs"] = data["data"]["epochs"]
-                data["memory"] = data["data"]["memory"]
+                data["metrics"] = data["data"].get("metrics")
+                data["client"] = data["data"].get("client")
+                data["timings"] = data["data"].get("timings")
+                data["dataset_size"] = data["data"].get("datasetSize")
+                data["model"] = data["data"].get("model")
+                data["epochs"] = data["data"].get("epochs")
+                data["memory"] = data["data"].get("memory")
                 data["data"] = None  # Clear original data to save memory
                 
                 json_data.append(data)

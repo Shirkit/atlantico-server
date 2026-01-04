@@ -2,8 +2,8 @@
 
 import struct
 import numpy as np
-import logging
 import traceback
+from .logging import get_logger
 
 def read_nn_binary_with_activation(filepath, logger=None):
     """
@@ -17,7 +17,7 @@ def read_nn_binary_with_activation(filepath, logger=None):
         logger: Optional logger instance (defaults to module logger)
     """
     if logger is None:
-        logger = logging.getLogger(__name__)
+        logger = get_logger(__name__)
     
     try:
         with open(filepath, 'rb') as f:
@@ -235,8 +235,8 @@ if __name__ == "__main__":
     # Test with the original ESP32 file
     filepath = "/home/shirkit/Projects/Github/atlantico-server/weights/2025-06-25_11-31-44/3/esp00.nn"
     # filepath = "/home/shirkit/Projects/Github/atlantico-server/weights/2025-06-25_10-13-21/1/esp00.nn"
-    
-    network = read_nn_binary_with_activation(filepath, False)
+
+    network = read_nn_binary_with_activation(filepath)
     
     if network:
         print("\n" + "="*60)

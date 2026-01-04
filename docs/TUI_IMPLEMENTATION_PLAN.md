@@ -37,22 +37,22 @@ Transform the atlantico-server from a CLI-based application to a modern Terminal
 
 ## TUI Architecture
 
-### Container Approach (Implemented)
+### Screen-based Architecture (Implemented)
 
-**Architecture Pattern:** Single-screen application with content swapping
+**Architecture Pattern:** Multi-screen application with persistent header/footer
 
-The application uses a **container approach** where:
+The application uses a **Screen-based architecture** where:
 - One main `ServerApp` instance runs throughout the session
-- Header and Footer remain visible at all times
-- Content area uses `ContentSwitcher` to swap between different views
-- All views (Dashboard, Devices, Federated, Logs, Settings) are widgets, not screens
-- Navigation is instant - just switches which view is visible
+- `Header` and `CustomFooter` are docked in each screen
+- Navigation uses `app.push_screen()` or `app.switch_screen()`
+- Each view (Dashboard, Devices, Federated, Logs, Settings) is a full `Screen` class
+- CSS is consolidated in `styles/main.tcss`
 
 **Benefits:**
-- Persistent header/footer navigation
-- Faster view switching (no screen push/pop)
-- Shared state easier to manage
-- More traditional desktop-app feel
+- Better separation of concerns (each screen is self-contained)
+- Native Textual navigation support
+- Easier to manage focus and keybindings per screen
+- Cleaner code structure
 
 ### Application Structure
 ```
@@ -60,14 +60,14 @@ atlantico_server/
 ├── server.py              # Existing server logic (keep as is)
 ├── tui/
 │   ├── __init__.py
-│   ├── app.py            # Main Textual app with ContentSwitcher
-│   ├── screens/          # Note: "screens" folder contains Views now
+│   ├── app.py            # Main Textual app with Screen management
+│   ├── screens/          # Full Screen classes
 │   │   ├── __init__.py
-│   │   ├── dashboard.py  # DashboardView - main view
-│   │   ├── devices.py    # DevicesView - device monitoring
-│   │   ├── federated.py  # FederatedView - training control
-│   │   ├── logs.py       # LogsView - logs viewer
-│   │   └── settings.py   # SettingsView - configuration
+│   │   ├── dashboard.py  # DashboardScreen
+│   │   ├── devices.py    # DevicesScreen
+│   │   ├── federated.py  # FederatedScreen
+│   │   ├── logs.py       # LogsScreen
+│   │   └── settings.py   # SettingsScreen
 │   ├── widgets/
 │   │   ├── __init__.py
 │   │   ├── device_table.py     # Custom device status table
@@ -75,7 +75,7 @@ atlantico_server/
 │   │   ├── status_bar.py       # Server status indicator
 │   │   └── log_viewer.py       # Real-time log display
 │   └── styles/
-│       └── main.css      # Textual CSS styling
+│       └── main.tcss     # Consolidated CSS styling
 └── server_tui.py         # Entry point for TUI mode
 ```
 
@@ -85,17 +85,17 @@ atlantico_server/
 │ Header (Atlantico Server - always visible) │
 ├─────────────────────────────────────────────┤
 │                                             │
-│  ContentSwitcher Area:                      │
-│  - Shows DashboardView (default)            │
-│  - Or DevicesView                           │
-│  - Or FederatedView                         │
-│  - Or LogsView                              │
-│  - Or SettingsView                          │
+│  Current Screen Area:                       │
+│  - DashboardScreen (default)                │
+│  - DevicesScreen                            │
+│  - FederatedScreen                          │
+│  - LogsScreen                               │
+│  - SettingsScreen                           │
 │                                             │
-│  (Only one visible at a time)               │
+│  (Only one active at a time)                │
 │                                             │
 ├─────────────────────────────────────────────┤
-│ Footer with keybindings (always visible)    │
+│ CustomFooter with keybindings               │
 │ [d] Dashboard [v] Devices [f] Federate      │
 │ [l] Logs [s] Settings [q] Quit              │
 └─────────────────────────────────────────────┘
@@ -440,10 +440,10 @@ atlantico_server/
 **Validation:** ✅ Implementation complete with comprehensive early exit points
 
 **Key Implementation Details:**
-- ConfigurationPanel: 4 input fields in Horizontal containers with proper labels
+- ConfigurationPanel: 2 input fields (Clients, Batch) - Rounds/Epochs removed
 - TrainingControlPanel: Dynamic button states with pause/resume toggle
-- ProgressPanel: Real-time updates from server.state with pause status
-- MetricsPanel: Ready for metric display (future enhancement)
+- ProgressPanel: 3-level progress bars (Tests, Rounds, Clients)
+- MetricsPanel: Removed (moved to MetricsScreen)
 - Pause Logic: Server-side state management, continues aggregation but holds sending
 
 ### Phase 5: Logs Screen & System-wide Logging (Tasks 5d)
@@ -491,6 +491,29 @@ atlantico_server/
 - **Clean separation:** One logging system, multiple display methods
 - **Module-level loggers:** Each module uses `logger = logging.getLogger(__name__)`
 - **Logger hierarchy:** server_tui.py uses `get_logger('atlantico_server')` for proper inheritance
+
+### Phase 5.5: UI Architecture & Polish (Completed)
+**Goal:** Refactor to Screen-based architecture and improve visual consistency
+
+1. ✅ Architecture Refactor
+   - ✅ Replaced ContentSwitcher with Screen-based navigation
+   - ✅ Created `BaseScreen` with docked Header and CustomFooter
+   - ✅ Updated all views to be full `Screen` classes
+   - ✅ Implemented `CustomFooter` with reactive highlighting
+
+2. ✅ CSS Organization
+   - ✅ Consolidated inline styles into `styles/main.tcss`
+   - ✅ Created utility classes (e.g., `.panel`)
+   - ✅ Implemented design tokens for consistent theming
+
+3. ✅ Visual Polish
+   - ✅ Improved button focus states
+   - ✅ Aligned border titles
+   - ✅ Responsive dashboard layout
+   - ✅ Dynamic header titles
+
+**Deliverable:** ✅ Modernized codebase with better maintainability and visuals
+**Validation:** ✅ Implemented and verified in November 2025
 
 ### Phase 6: Settings Screen (Tasks 5e)
 **Goal:** Configuration management
@@ -687,12 +710,11 @@ Textual has minimal dependencies and works with existing Python 3.11+.
 
 ## Next Steps
 
-1. ✅ Review and approve this plan
-2. Start Phase 1: Install Textual and create basic app structure
-3. Iterate through phases, testing each one
-4. Deploy and test in Docker environment
-5. Gather feedback and iterate
+1. ✅ Phase 1-5.5 Complete: Core functionality and architecture refactor done
+2. Start Phase 5.6: Additional UI Polish (Device Monitor, Federated Screen, Logs)
+3. Start Phase 6: Settings Screen implementation
+4. Phase 7: Final integration and polish
 
 ---
 
-**Ready to begin? Let's start with Phase 1!** 🚀
+**Current Status: Ready for Phase 5.6 (UI Polish)** 🚀
