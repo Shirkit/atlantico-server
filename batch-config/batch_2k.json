@@ -1,0 +1,35 @@
+[
+  {
+    "name": "2k w0.025 b0.005 t1",
+    "epochs": 1,
+    "rounds": 10,
+    "layers": [3, 40, 30, 20, 10, 6],
+    "activationFunctions": [1, 1, 1, 1, 6],
+    "learningRateWeights": 0.025,
+    "learningRateBiases": 0.005,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "test_lr_w0.025_b0.005 t2",
+    "epochs": 1,
+    "rounds": 10,
+    "layers": [3, 40, 30, 20, 10, 6],
+    "activationFunctions": [1, 1, 1, 1, 6],
+    "learningRateWeights": 0.025,
+    "learningRateBiases": 0.005,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "test_lr_w0.025_b0.005 t3",
+    "epochs": 1,
+    "rounds": 10,
+    "layers": [3, 40, 30, 20, 10, 6],
+    "activationFunctions": [1, 1, 1, 1, 6],
+    "learningRateWeights": 0.025,
+    "learningRateBiases": 0.005,
+    "seed": 42,
+    "sendJsonWeights": false
+  }
+]

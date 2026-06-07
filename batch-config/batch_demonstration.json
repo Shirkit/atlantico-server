@@ -1,0 +1,46 @@
+[
+  {
+    "name": "2k 6r",
+    "epochs": 1,
+    "rounds": 6,
+    "layers": [3, 40, 30, 20, 10, 6],
+    "activationFunctions": [1, 1, 1, 1, 6],
+    "learningRateWeights": 0.025,
+    "learningRateBiases": 0.005,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "2k bw alto",
+    "epochs": 1,
+    "rounds": 3,
+    "layers": [3, 40, 30, 20, 10, 6],
+    "activationFunctions": [1, 1, 1, 1, 6],
+    "learningRateWeights": 0.25,
+    "learningRateBiases": 0.05,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "2k bw baixo",
+    "epochs": 1,
+    "rounds": 3,
+    "layers": [3, 40, 30, 20, 10, 6],
+    "activationFunctions": [1, 1, 1, 1, 6],
+    "learningRateWeights": 0.0025,
+    "learningRateBiases": 0.0005,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "0.5k 6r",
+    "epochs": 1,
+    "rounds": 6,
+    "layers": [3, 20, 15, 10, 6],
+    "activationFunctions": [1, 1, 1, 6],
+    "learningRateWeights": 0.025,
+    "learningRateBiases": 0.005,
+    "seed": 42,
+    "sendJsonWeights": false
+  }
+]

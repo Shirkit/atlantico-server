@@ -1,0 +1,9 @@
+{
+    "epochs": 1,
+    "layers": [3, 20, 15, 6],
+    "activationFunctions": [1, 1, 6],
+    "learningRateWeights": 0.1,
+    "learningRateBiases": 0.02,
+    "seed": 42,
+    "sendJsonWeights": false
+}

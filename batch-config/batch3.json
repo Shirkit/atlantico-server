@@ -1,0 +1,57 @@
+[
+  {
+    "name": "test_lr_w0.05_b0.01",
+    "epochs": 1,
+    "rounds": 10,
+    "layers": [3, 220, 110, 55, 27, 13, 6],
+    "activationFunctions": [1, 1, 1, 1, 1, 6],
+    "learningRateWeights": 0.05,
+    "learningRateBiases": 0.01,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "test_lr_w0.025_b0.005",
+    "epochs": 1,
+    "rounds": 10,
+    "layers": [3, 220, 110, 55, 27, 13, 6],
+    "activationFunctions": [1, 1, 1, 1, 1, 6],
+    "learningRateWeights": 0.025,
+    "learningRateBiases": 0.005,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "test_lr_w0.0125_b0.0025",
+    "epochs": 1,
+    "rounds": 10,
+    "layers": [3, 220, 110, 55, 27, 13, 6],
+    "activationFunctions": [1, 1, 1, 1, 1, 6],
+    "learningRateWeights": 0.0125,
+    "learningRateBiases": 0.0025,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "test_lr_w0.00625_b0.00125",
+    "epochs": 1,
+    "rounds": 10,
+    "layers": [3, 220, 110, 55, 27, 13, 6],
+    "activationFunctions": [1, 1, 1, 1, 1, 6],
+    "learningRateWeights": 0.00625,
+    "learningRateBiases": 0.00125,
+    "seed": 42,
+    "sendJsonWeights": false
+  },
+  {
+    "name": "test_lr_w0.003125_b0.000625",
+    "epochs": 1,
+    "rounds": 10,
+    "layers": [3, 220, 110, 55, 27, 13, 6],
+    "activationFunctions": [1, 1, 1, 1, 1, 6],
+    "learningRateWeights": 0.003125,
+    "learningRateBiases": 0.000625,
+    "seed": 42,
+    "sendJsonWeights": false
+  }
+]
