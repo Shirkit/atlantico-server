@@ -67,7 +67,7 @@ class MetricsScreen(Screen):
                 with TabPane("Data Table", id="table-tab"):
                     # Create and configure table here to ensure it exists
                     self.table = DataTable(id="metrics-table")
-                    self.table.add_columns("Round", "Client", "Accuracy", "Loss (MSE)", "F1 Score", "Training Time (s)")
+                    self.table.add_columns("Round", "Client", "Accuracy", "Loss (MSE)", "F1 Score", "Balanced Accuracy", "Balanced F1", "Training Time (s)")
                     self.table.cursor_type = "row"
                     self.table.zebra_stripes = True
                     yield self.table
@@ -277,6 +277,8 @@ class MetricsScreen(Screen):
             accuracy = f"{float(metrics.get('accuracy', 0)):.4f}"
             loss = f"{float(metrics.get('meanSqrdError', 0)):.4f}"
             f1 = f"{float(metrics.get('f1Score', 0)):.4f}"
+            balanced_acc = f"{float(metrics.get('balancedAccuracy', 0)):.4f}"
+            balanced_f1 = f"{float(metrics.get('balancedF1Score', 0)):.4f}"
             
             training_time = timings.get("training", 0)
             training_time_s = f"{training_time / 1000:.2f}" if training_time else "-"
@@ -287,6 +289,8 @@ class MetricsScreen(Screen):
                 accuracy,
                 loss,
                 f1,
+                balanced_acc,
+                balanced_f1,
                 training_time_s
             )
 

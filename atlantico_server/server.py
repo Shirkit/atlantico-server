@@ -21,28 +21,22 @@ import argparse
 import sys
 from .parser import do_parse, plot_batch_comparison
 from .reader import read_nn_binary_with_activation
-from .logging import setup_logging
+from .log_setup import setup_logging
 
 # Global configuration constants
 BROKER_IP = os.getenv("MQTT_BROKER_HOST", "127.0.0.1")
 BROKER_PORT = 1883
 BROKER_KEEPALIVE = 60
 
-# MQTT Topics
-TOPIC_RECEIVE_FROM_DEVICES = "esp32/fl/model/push"
-TOPIC_RECEIVE_FROM_DEVICES_RAW = "esp32/fl/model/rawpush/+"
-TOPIC_SEND_TO_DEVICES = "esp32/fl/model/pull"
-TOPIC_SEND_TO_DEVICES_RAW = "esp32/fl/model/rawpull"
-TOPIC_RECEIVE_COMMANDS_FROM_DEVICES = "esp32/fl/commands/push"
-TOPIC_SEND_COMMANDS_TO_DEVICES = "esp32/fl/commands/pull"
-TOPIC_RESUME_TO_DEVICES = "esp32/fl/model/resume"
-TOPIC_RESUME_TO_DEVICES_RAW = "esp32/fl/model/rawresume"
+# MQTT Topics (Defaults)
+DEFAULT_TOPIC_PREFIX = "esp32"
 
 # Directory paths
 PARSE_FOLDER = "parse/"
 PARSE_ALL_FOLDER = "parse_all/"
 WEIGHTS_FOLDER = "weights/"
 METRICS_FOLDER = "metrics/"
+BATCH_CONFIG_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "batch-config"))
 
 # Federated learning configuration
 DEFAULT_LAYERS = [32, 200, 100, 50, 25, 18]
@@ -59,8 +53,8 @@ DEFAULT_SEND_JSON_WEIGHTS = False
 
 # Timing constants
 CONNECTION_WAIT_TIME = 10
-COMMAND_RETRY_INTERVAL = 3
-COMMAND_RETRIES = 3
+COMMAND_RETRY_INTERVAL = 2
+COMMAND_RETRIES = 6
 STATUS_UPDATE_INTERVAL = 30
 
 
@@ -77,7 +71,7 @@ class FederatedServerState:
         self.federated_clients = {}  # {device_id: {'round': int, 'progress': str, 'last_update': timestamp}}
         self.debug = False
         self.is_paused = False
-        self.paused_aggregated_path: str | None = None  # Store path to aggregated weights when paused
+        self.paused_aggregated_path = None  # Store path to aggregated weights when paused
         self.stop_requested = False  # Flag to gracefully stop federated learning
         
         # Batch progress tracking
@@ -107,39 +101,157 @@ class FederatedServerState:
         self.current_test_name = ""
 
 
+from .strategies import Strategies
+
 class MQTTFederatedServer:
     """Main federated learning server class"""
     
-    def __init__(self, debug=False, enable_stdout=True):
+    def __init__(self, debug=False, enable_stdout=True, topic_prefix=DEFAULT_TOPIC_PREFIX):
         # Use a short, human-friendly id suffix (8 hex chars) for broker logs
         short_id = uuid.uuid4().hex[:8]
-        self.client = mqtt.Client(client_id=f"Aggregrator-{short_id}", clean_session=True)
+        self.client_id = f"{topic_prefix}-Aggregator-{short_id}"
+        self.client = mqtt.Client(client_id=self.client_id, clean_session=True)
         self.state = FederatedServerState()
-        self._setup_mqtt_client()
         self.debug = debug
         
         # Setup logging (file always, stdout optional)
         self.logger = setup_logging(debug=debug, enable_stdout=enable_stdout)
+
+        # Setup topics
+        self.topic_prefix = topic_prefix
+        self.hierarchical_config = {
+            "enabled": False,
+            "parent_prefix": "aggregator",
+            "process_type": "latest_asynchronous",
+            "merge_strategy": "next_round_50_percent"
+        }
+        self.max_wait_time = None
+        self._update_topics()
+        
+        # Event system
+        self.events = {}
+        self.strategies = Strategies(self)
+        self._setup_strategies()
+        
+        # self._setup_mqtt_client()
+
+    def register_event_handler(self, event_name, callback, priority=5):
+        """Register a callback for an event with priority (higher runs later)"""
+        if event_name not in self.events:
+            self.events[event_name] = []
+        # Store as tuple (priority, callback)
+        self.events[event_name].append((priority, callback))
+        # Sort by priority
+        self.events[event_name].sort(key=lambda x: x[0])
+
+    def fire_event(self, event_name, data=None):
+        """Fire an event and call all registered callbacks"""
+        if event_name in self.events:
+            result = True
+            for priority, callback in self.events[event_name]:
+                try:
+                    this_result = callback(data)
+                    if this_result is not None:
+                        result = result and this_result
+                except Exception as e:
+                    self.logger.error(f"Error in event handler for {event_name}: {e}")
+            return result
+
+    def _setup_strategies(self):
+        """Setup strategies based on configuration"""
+        # Clear existing handlers for strategy events
+        self.events = {}
+        self.strategies.setup()
+
+    def _update_topics(self):
+        """Update MQTT topics based on prefix"""
+        # Topics for my devices (I am the server)
+        self.TOPIC_RECEIVE_FROM_DEVICES = f"{self.topic_prefix}/fl/model/push"
+        self.TOPIC_RECEIVE_FROM_DEVICES_RAW = f"{self.topic_prefix}/fl/model/rawpush/+"
+        self.TOPIC_SEND_TO_DEVICES = f"{self.topic_prefix}/fl/model/pull"
+        self.TOPIC_SEND_TO_DEVICES_RAW = f"{self.topic_prefix}/fl/model/rawpull"
+        self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES = f"{self.topic_prefix}/fl/commands/push"
+        self.TOPIC_SEND_COMMANDS_TO_DEVICES = f"{self.topic_prefix}/fl/commands/pull"
+        self.TOPIC_RESUME_TO_DEVICES = f"{self.topic_prefix}/fl/model/resume"
+        self.TOPIC_RESUME_TO_DEVICES_RAW = f"{self.topic_prefix}/fl/model/rawresume"
+        
+        # Topics for my parent (I am the client)
+        if self.hierarchical_config["enabled"]:
+            pp = self.hierarchical_config["parent_prefix"]
+            cid = self.client_id
+            self.TOPIC_RECEIVE_FROM_PARENT = f"{pp}/fl/model/pull"
+            self.TOPIC_RECEIVE_FROM_PARENT_RAW = f"{pp}/fl/model/rawpull"
+            self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT = f"{pp}/fl/commands/pull"
+            
+            self.TOPIC_SEND_TO_PARENT = f"{pp}/fl/model/push"
+            self.TOPIC_SEND_TO_PARENT_RAW = f"{pp}/fl/model/rawpush/{cid}"
+            self.TOPIC_SEND_COMMANDS_TO_PARENT = f"{pp}/fl/commands/push"
+
+    def update_hierarchical_config(self, config):
+        """Update hierarchical configuration"""
+        self._setup_strategies()
+        self._update_topics()
+
+    def update_topic_prefix(self, prefix):
+        """Update topic prefix and refresh topics"""
+        if self.client.is_connected():
+            old_topics = [
+                self.TOPIC_RECEIVE_FROM_DEVICES,
+                self.TOPIC_RECEIVE_FROM_DEVICES_RAW,
+                self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES
+            ]
+            self.client.unsubscribe(old_topics)
+
+        self.topic_prefix = prefix
+        self._update_topics()
+        short_id = uuid.uuid4().hex[:8]
+        self.client_id = f"{self.topic_prefix}-Aggregator-{short_id}"
+        # Only change client_id if we were to reconnect, but for now just updating prefix is enough for topics
+        
+        if self.client.is_connected():
+            new_topics = [
+                (self.TOPIC_RECEIVE_FROM_DEVICES, 0),
+                (self.TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
+                (self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
+            ]
+            self.client.subscribe(new_topics)
         
     def _setup_mqtt_client(self):
         """Configure MQTT client"""
+        self.client.connect(BROKER_IP, BROKER_PORT, BROKER_KEEPALIVE)
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
-        self.client.connect(BROKER_IP, BROKER_PORT, BROKER_KEEPALIVE)
         
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback"""
         if rc != 0:
             self.logger.error(f"MQTT connection failed with code: {rc}")
+        else:
+            if self.hierarchical_config["enabled"]:
+                self.logger.info("Subscribing to parent topics")
+                client.subscribe([
+                    (self.TOPIC_RECEIVE_FROM_PARENT, 0),
+                    (self.TOPIC_RECEIVE_FROM_PARENT_RAW, 0),
+                    (self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT, 0),
+                ])
             
     def _on_message(self, client, userdata, message):
         """MQTT message callback"""
         try:
             topic = message.topic
             topic_parts = topic.split('/')
-            if self.debug:
-                self.logger.debug(f"Message received on topic: {topic}")
+            self.logger.debug(f"Message received on topic: {topic}")
             
+            # Handle Parent Messages (Hierarchical Mode)
+            if self.hierarchical_config["enabled"]:
+                if topic == self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT:
+                    self._handle_parent_command(message.payload.decode("utf-8"))
+                    return
+                elif topic == self.TOPIC_RECEIVE_FROM_PARENT_RAW:
+                    self._handle_parent_raw_model(message.payload)
+                    return
+
+            # Handle Device Messages
             if topic_parts[2] == "model" and topic_parts[3] == "rawpush":
                 if self.debug:
                     self.logger.debug('Receiving neural network file')
@@ -210,6 +322,110 @@ class MQTTFederatedServer:
                 
         except json.JSONDecodeError as e:
             self.logger.error(f"Processing command: {e}")
+
+    def _handle_parent_command(self, payload):
+        """Handle commands from parent aggregator"""
+        try:
+            command_data = json.loads(payload)
+            command = command_data.get("command")
+            
+            if command == "federate_alive":
+                # Respond with alive
+                self._send_to_parent({"command": "alive", "client": self.client_id}, is_command=True)
+            elif command == "federate_start":
+                self.logger.info("Received start command from parent aggregator")
+                # Ideally we would start our own federation here, but for now just log
+            elif command == "request_model":
+                self.push_model_to_parent()
+            elif command == "federate_join":
+                self.logger.info("Received join request from parent aggregator")
+                self.join_parent()
+            elif command == "federate_unsubscribe":
+                self.logger.info("Received unsubscribe command from parent aggregator")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling parent command: {e}")
+
+    def _handle_parent_raw_model(self, payload):
+        """Handle global model received from parent"""
+        self.logger.info("Received global model from parent aggregator")
+        # Save as 'parent_model.nn' in weights folder or current round folder
+        try:
+            path = os.path.join(WEIGHTS_FOLDER, "parent_model.nn")
+            with open(path, "wb") as f:
+                f.write(payload)
+            
+            # Fire event
+            self.fire_event("on_parent_model_received", {"model_path": path})
+            
+        except Exception as e:
+            self.logger.error(f"Error saving parent model: {e}")
+
+    def _send_to_parent(self, data, is_command=False, topic=None):
+        """Send data to parent aggregator"""
+        if not self.hierarchical_config["enabled"]:
+            return
+            
+        try:
+            if is_command or topic is self.TOPIC_SEND_COMMANDS_TO_PARENT:
+                topic = self.TOPIC_SEND_COMMANDS_TO_PARENT
+                payload = json.dumps(data)
+            elif topic is not None and topic is self.TOPIC_SEND_TO_PARENT:
+                payload = json.dumps(data)
+            else:
+                # Assume data is binary model content
+                topic = self.TOPIC_SEND_TO_PARENT_RAW
+                payload = data
+                
+            self.client.publish(topic, payload)
+        except Exception as e:
+            self.logger.error(f"Error sending to parent: {e}")
+
+    def join_parent(self):
+        """Send join command to parent aggregator"""
+        if self.hierarchical_config["enabled"]:
+            self.logger.info(f"Joining parent aggregator as {self.client_id}")
+            self._send_to_parent({"command": "join", "client": self.client_id}, is_command=True)
+
+    def push_model_to_parent(self, model_path=None):
+        """Push aggregated model to parent aggregator"""
+        if not self.hierarchical_config["enabled"]:
+            return
+
+        if model_path is None:
+            # Default to aggregated weights
+             model_path = os.path.join(WEIGHTS_FOLDER, "aggregated_weights.nn")
+             if self.state.is_federated:
+                 model_path = os.path.join(self.state.federated_path, str(self.state.current_round), "aggregated_weights.nn")
+
+        if os.path.exists(model_path):
+            self.logger.info(f"Pushing model to parent: {model_path}")
+            with open(model_path, "rb") as f:
+                content = f.read()
+                self._send_to_parent(content, is_command=False)
+
+                combined_metrics = {
+                    "round": self.state.current_round,
+                    "clients": {},
+                    "client": self.client_id
+                }
+                for client_id in self.state.federated_clients.keys():
+                    client_metrics_path = os.path.join(
+                        self.state.federated_path,
+                        str(self.state.current_round),
+                        f"{client_id}_metrics.json"
+                    )
+                    if os.path.exists(client_metrics_path):
+                        with open(client_metrics_path, "r") as f:
+                            client_metrics = json.load(f)
+                            combined_metrics["clients"][client_id] = client_metrics
+                self._send_to_parent(combined_metrics, topic=self.TOPIC_SEND_TO_PARENT)
+                self.fire_event("on_model_pushed_to_parent", {"model_path": model_path, "round": self.state.current_round})
+                
+            # Also send JSON metadata if needed
+            # self._send_to_parent({...}, is_command=False, topic=self.TOPIC_SEND_TO_PARENT)
+        else:
+            self.logger.warning("No model to push to parent")
     
     def _handle_federated_command(self, command, client_id, command_data):
         """Handle federated learning specific commands"""
@@ -252,6 +468,7 @@ class MQTTFederatedServer:
     def _handle_resume_command(self, client_id):
         """Handle client resume notifications"""
         if client_id in self.state.connected_clients:
+            # if client_id in self.state.connected_clients and client_id in self.state.federated_clients and self.state.waiting_for_clients and client_id in self.state.waiting_for_clients:
             self.logger.info(f"Client {client_id} is ready to continue")
             try:
                 resume_command = {
@@ -270,7 +487,7 @@ class MQTTFederatedServer:
                 
                 if os.path.exists(aggregated_binary_path):
                     self.logger.debug(f"Sending binary resume file to {client_id}")
-                    self._send_binary_file(aggregated_binary_path, f"{TOPIC_RESUME_TO_DEVICES_RAW}/{client_id}")
+                    self._send_binary_file(aggregated_binary_path, f"{self.TOPIC_RESUME_TO_DEVICES_RAW}/{client_id}")
                 else:
                     # Fallback to JSON if binary file doesn't exist
                     aggregated_json_path = os.path.join(
@@ -279,7 +496,7 @@ class MQTTFederatedServer:
                         "aggregated_weights.json"
                     )
                     self.logger.debug(f"Binary file not found, sending JSON to {client_id}")
-                    self._send_file(aggregated_json_path, TOPIC_RESUME_TO_DEVICES)
+                    self._send_file(aggregated_json_path, self.TOPIC_RESUME_TO_DEVICES)
                 
             except Exception as e:
                 self.logger.error(f"Sending weights file: {e}")
@@ -335,8 +552,10 @@ class MQTTFederatedServer:
             self.logger.error(f"Decoding JSON: {e}")
             self.logger.error(f"Received data: {data}")
     
-    def _send_command(self, command_data, topic=TOPIC_SEND_COMMANDS_TO_DEVICES):
+    def _send_command(self, command_data, topic=None):
         """Send command via MQTT"""
+        if topic is None:
+            topic = self.TOPIC_SEND_COMMANDS_TO_DEVICES
         try:
             if self.debug:
                 self.logger.debug("Sending command via MQTT")
@@ -344,8 +563,10 @@ class MQTTFederatedServer:
         except Exception as e:
             self.logger.error(f"Sending command via MQTT: {e}")
     
-    def _send_file(self, filepath, topic=TOPIC_SEND_TO_DEVICES):
+    def _send_file(self, filepath, topic=None):
         """Send file content via MQTT"""
+        if topic is None:
+            topic = self.TOPIC_SEND_TO_DEVICES
         try:
             if os.path.exists(filepath):
                 with open(filepath, "r") as file:
@@ -432,8 +653,10 @@ class MQTTFederatedServer:
             self.logger.error(f"Writing binary file {filepath}: {e}")
             return False
     
-    def _send_binary_file(self, filepath, topic=TOPIC_SEND_TO_DEVICES_RAW):
+    def _send_binary_file(self, filepath, topic=None):
         """Send binary file content via MQTT"""
+        if topic is None:
+            topic = self.TOPIC_SEND_TO_DEVICES_RAW
         try:
             if os.path.exists(filepath):
                 with open(filepath, "rb") as file:
@@ -463,7 +686,13 @@ class MQTTFederatedServer:
             nn_files = [f for f in nn_files if any(device_id in f for device_id in federated_device_ids)]
         
         if nn_files:
-            return self._aggregate_weights_binary(source_dir, nn_files, round_number)
+            result = self.fire_event("on_round_aggregation_started", {"round": round_number, "files": nn_files, "method": "binary"})
+            if result:
+                nn_files = result
+            path = self._aggregate_weights_binary(source_dir, nn_files, round_number)
+            if path:
+                self.fire_event("on_round_aggregation_completed", {"model_path": path, "round": round_number})
+            return path
         else:
             # FALLBACK METHOD: Use JSON files if no .nn files found
             self.logger.warning("No .nn files found, trying JSON fallback method")
@@ -471,7 +700,13 @@ class MQTTFederatedServer:
             
             if json_files:
                 self.logger.debug(f"Using JSON fallback method: {len(json_files)} JSON files found")
-                return self._aggregate_weights_json(source_dir, json_files, round_number)
+                result = self.fire_event("on_round_aggregation_started", {"round": round_number, "files": json_files, "method": "json"})
+                if result:
+                    json_files = result
+                path = self._aggregate_weights_json(source_dir, json_files, round_number)
+                if path:
+                    self.fire_event("on_round_aggregation_completed", {"model_path": path, "round": round_number})
+                return path
             else:
                 self.logger.error("No .nn or .json files found for aggregation")
                 return None
@@ -492,53 +727,16 @@ class MQTTFederatedServer:
             self.logger.error("No valid data for binary aggregation")
             return None
 
-        # Verify all networks have the same structure
-        first_network = networks[0]
-        for i, network in enumerate(networks[1:], 1):
-            if network['numberOflayers'] != first_network['numberOflayers']:
-                self.logger.error(f"Different number of layers in file {nn_files[i]}")
-                return None
-            
-            for layer_idx in range(network['numberOflayers']):
-                first_layer = first_network['layers'][layer_idx]
-                curr_layer = network['layers'][layer_idx]
-                
-                if (first_layer['inputs'] != curr_layer['inputs'] or
-                    first_layer['outputs'] != curr_layer['outputs']):
-                    self.logger.error(f"Different layer structure in file {nn_files[i]}")
-                    return None
+        # Use the configured aggregation strategy
+        aggregated_network = self.strategies.aggregate(networks)
         
-        # Create aggregated network structure
-        aggregated_network = {
-            'numberOflayers': first_network['numberOflayers'],
-            'layers': []
-        }
-        
-        # Aggregate each layer
-        for layer_idx in range(first_network['numberOflayers']):
-            first_layer = first_network['layers'][layer_idx]
+        if aggregated_network is None:
+            self.logger.error("Aggregation failed")
+            return None
             
-            aggregated_layer = {
-                'inputs': first_layer['inputs'],
-                'outputs': first_layer['outputs'],
-                'activation_function': first_layer['activation_function'],
-                'biases': np.zeros(first_layer['outputs'], dtype=np.float32),
-                'weights': np.zeros((first_layer['outputs'], first_layer['inputs']), dtype=np.float32)
-            }
-            
-            # Sum all biases and weights
-            for network in networks:
-                layer = network['layers'][layer_idx]
-                aggregated_layer['biases'] += layer['biases']
-                aggregated_layer['weights'] += layer['weights']
-            
-            # Average the sums
-            aggregated_layer['biases'] /= len(networks)
-            aggregated_layer['weights'] /= len(networks)
-            
-            aggregated_network['layers'].append(aggregated_layer)
-            if self.debug:
-                self.logger.debug(f"Layer {layer_idx}: {aggregated_layer['inputs']} → {aggregated_layer['outputs']}")
+        if self.debug:
+            for layer_idx, layer in enumerate(aggregated_network['layers']):
+                self.logger.debug(f"Layer {layer_idx}: {layer['inputs']} → {layer['outputs']}")
         
         # Save aggregated network as binary file
         if self.state.is_federated:
@@ -662,6 +860,10 @@ class MQTTFederatedServer:
         
         self.logger.info(f"Aggregated weights saved to: {output_path}")
         self.logger.info(f"Aggregated {valid_count} valid models from {len(json_data)} total (JSON method)")
+        
+        # Fire aggregation completed event
+        self.fire_event("on_round_aggregation_completed", {"model_path": output_path, "round": round_number})
+        
         return output_path
     
     def start_federated_learning(self, max_rounds=None, expected_clients=None):
@@ -670,10 +872,19 @@ class MQTTFederatedServer:
         
         # Setup MQTT subscriptions
         topics = [
-            (TOPIC_RECEIVE_FROM_DEVICES, 0),
-            (TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
-            (TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
+            (self.TOPIC_RECEIVE_FROM_DEVICES, 0),
+            (self.TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
+            (self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
         ]
+        
+        if self.hierarchical_config["enabled"]:
+            topics.extend([
+                (self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT_RAW, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT, 0)
+            ])
+            self.join_parent()
+            
         self.client.subscribe(topics)
         self.client.loop_start()
         
@@ -804,9 +1015,9 @@ class MQTTFederatedServer:
         self.client.loop_stop()
         
         topics = [
-            (TOPIC_RECEIVE_FROM_DEVICES, 0),
-            (TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
-            (TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
+            (self.TOPIC_RECEIVE_FROM_DEVICES, 0),
+            (self.TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
+            (self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
         ]
         self.client.subscribe(topics)
         
@@ -822,7 +1033,7 @@ class MQTTFederatedServer:
     def check_alive_devices(self):
         """Check which devices are alive"""
         self.client.loop_stop()
-        topics = [(TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)]
+        topics = [(self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)]
         self.client.subscribe(topics)
         
         self.logger.debug("Sending alive signal to devices")
@@ -865,12 +1076,124 @@ class MQTTFederatedServer:
         self.client.disconnect()
         self.logger.debug("MQTT client disconnected")
 
+    def start_parent_aggregation_only(self, aggregation_config = {}):
+        """Start aggregation-only mode with given configuration"""
+        self.logger.info("Starting Aggregation-Only Mode")
+        
+        # Setup MQTT subscriptions
+        topics = [
+            (self.TOPIC_RECEIVE_FROM_DEVICES, 0),
+            (self.TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
+            (self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
+        ]
+        
+        if self.hierarchical_config["enabled"]:
+            topics.extend([
+                (self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT_RAW, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT, 0)
+            ])
+            self.join_parent()
+            
+        self.client.subscribe(topics)
+        self.client.loop_start()
+        
+        self.logger.info("Aggregation-Only Mode is now active")
+        
+        # Load aggregation configuration
+        self.state.is_federated = True
+        self.state.federated_path = aggregation_config.get("federated_path", WEIGHTS_FOLDER)
+        os.makedirs(self.state.federated_path, exist_ok=True)
+        
+        self.logger.info(f"Aggregation path: {self.state.federated_path}")
+        
+        # Initialize state for aggregation
+        self.state.current_round = 0
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        test_name = aggregation_config.get("name", "aggregation_only")
+        
+        # Override federated path to be unique for this run
+        self.state.federated_path = os.path.join(self.state.federated_path, f"{timestamp}_{test_name}")
+        os.makedirs(self.state.federated_path, exist_ok=True)
+        os.makedirs(os.path.join(self.state.federated_path, str(self.state.current_round)), exist_ok=True)
+
+        self.logger.info(f"Aggregation session path: {self.state.federated_path}")
+
+        # Wait for client connections (Child Aggregators)
+        self.logger.debug(f"Waiting {CONNECTION_WAIT_TIME}s for child aggregator connections")
+
+        # 1. Ask everyone to unsubscribe from any previous session
+        for i in range(COMMAND_RETRIES):
+            unsub_command = {"command": "federate_unsubscribe"}
+            self._send_command(json.dumps(unsub_command, separators=(',', ':')))
+            sleep(COMMAND_RETRY_INTERVAL)
+        
+        # 2. Ask everyone to join this session
+        for i in range(COMMAND_RETRIES):
+            join_command = {"command": "federate_join"}
+            self._send_command(json.dumps(join_command, separators=(',', ':')))
+            sleep(COMMAND_RETRY_INTERVAL)
+        
+        # Wait for devices to respond to join command (they'll populate federated_clients)
+        sleep(2)
+        
+        self.logger.info(f"Aggregation session started with {len(self.state.federated_clients)} child aggregators "
+                       f"({len(self.state.connected_clients)} total connected)")
+        
+        # 3. Send Start Command
+        # Note: In hierarchical mode, we trust that child aggregators already have their
+        # NN configuration (layers, etc) set up, or they will receive it from their own config.
+        # However, we still send a start command to signal the beginning of the process.
+        # We pass minimal config to satisfy protocol if needed.
+        start_command = {
+            "command": "federate_start",
+            "config": aggregation_config.get("config", {
+                 "layers": DEFAULT_LAYERS, # Default or placeholder
+                 "actvFunctions": DEFAULT_ACTIVATION_FUNCTIONS,
+                 "epochs": DEFAULT_EPOCHS,
+                 "learningRateOfWeights": DEFAULT_LEARNING_RATE_WEIGHTS,
+                 "learningRateOfBiases": DEFAULT_LEARNING_RATE_BIASES,
+                 "randomSeed": DEFAULT_RANDOM_SEED,
+                 "jsonWeights": DEFAULT_SEND_JSON_WEIGHTS
+            })
+        }
+        
+        # Set max rounds to infinite (or very large) if not specified, 
+        # but for safety we can just track rounds indefinitely.
+        self.state.max_rounds = 999999999
+        
+        # Update federated clients that joined to Training/Waiting status
+        for client_id in self.state.federated_clients:
+            self.state.federated_clients[client_id]['progress'] = 'Waiting' 
+            self.state.federated_clients[client_id]['last_update'] = time.time()
+        
+        self._send_command(json.dumps(start_command, separators=(',', ':')))
+        
+        # Save configuration
+        self._save_federated_config(start_command, {"name": test_name})
+
+        # Run loop
+        try:
+            self._run_single_test_loop()
+            
+        except Exception as e:
+            self.logger.error(f"Error in aggregation loop: {e}")
+            traceback.print_exc()
+            
+        except KeyboardInterrupt:
+            self.logger.info("Stopping Aggregation-Only Mode")
+
+        finally:
+            self.client.loop_stop()
+            self._cleanup_federated_learning()
+
     def start_batch_federated_learning(self, batch_config_path, expected_clients=None):
         """Start batch federated learning process from JSON configuration file"""
         self.logger.info("Starting Batch Federated Learning")
         
         # Load batch configuration
         try:
+            batch_config_path = self._resolve_batch_config_path(batch_config_path)
             with open(batch_config_path, 'r') as f:
                 batch_config = json.load(f)
         except FileNotFoundError:
@@ -895,10 +1218,19 @@ class MQTTFederatedServer:
         
         # Setup MQTT subscriptions
         topics = [
-            (TOPIC_RECEIVE_FROM_DEVICES, 0),
-            (TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
-            (TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
+            (self.TOPIC_RECEIVE_FROM_DEVICES, 0),
+            (self.TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
+            (self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
         ]
+        
+        if self.hierarchical_config["enabled"]:
+            topics.extend([
+                (self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT_RAW, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT, 0)
+            ])
+            self.join_parent()
+            
         self.client.subscribe(topics)
         self.client.loop_start()
         
@@ -912,6 +1244,8 @@ class MQTTFederatedServer:
         failed_tests = 0
         
         for test_index, test_config in enumerate(batch_config):
+            sleep(3)
+
             self.state.current_test_index = test_index + 1
             self.state.current_test_name = test_config.get('name', f'Test {test_index + 1}')
             
@@ -981,6 +1315,9 @@ class MQTTFederatedServer:
                 "layers": test_config['layers'],
                 "seed": test_config['seed']
             }
+            dataset_selection = self._build_dataset_selection(test_config)
+            if dataset_selection:
+                test_info.update(dataset_selection)
             batch_summary["tests"].append(test_info)
         
         # Save batch summary
@@ -998,6 +1335,114 @@ class MQTTFederatedServer:
         # Final cleanup
         self._cleanup_federated_learning()
     
+    def start_interval_federated_learning(self, config_file, interval_seconds, rounds_per_interval, delay_between_rounds, total_intervals=None, expected_clients=None):
+        """Start interval-based federated learning process"""
+        self.logger.info("Starting Interval-Based Federated Learning")
+
+        # Load batch configuration
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+        except FileNotFoundError:
+            self.logger.error(f"Configuration file not found: {config_file}")
+            return
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Error decoding JSON: {e}")
+            return
+        
+        if not isinstance(config, dict):
+            self.logger.error("Configuration must be a test dict")
+            return
+        
+        if rounds_per_interval is None or isinstance(rounds_per_interval, int) == False and rounds_per_interval <= 0:
+            self.logger.error("rounds_per_interval must be a positive integer")
+            return
+        
+        if interval_seconds is None or isinstance(interval_seconds, int) == False and interval_seconds <= 0:
+            self.logger.error("interval_seconds must be a positive integer")
+            return
+        
+        if delay_between_rounds is None or isinstance(delay_between_rounds, int) == False or delay_between_rounds < 0:
+            self.logger.error("delay_between_rounds must be a non-negative integer")
+            return
+
+        # Create batch-specific folder
+        folder_name = f"interval_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}"
+        base_path = os.path.join(WEIGHTS_FOLDER, folder_name)
+        os.makedirs(base_path, exist_ok=True)
+        self.state.base_path = base_path
+        
+        self.logger.info(f"Base path folder: {base_path}")
+        
+        # Setup MQTT subscriptions
+        topics = [
+            (self.TOPIC_RECEIVE_FROM_DEVICES, 0),
+            (self.TOPIC_RECEIVE_FROM_DEVICES_RAW, 0),
+            (self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES, 0)
+        ]
+        
+        if self.hierarchical_config["enabled"]:
+            topics.extend([
+                (self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT_RAW, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT, 0)
+            ])
+            self.join_parent()
+            
+        self.client.subscribe(topics)
+        self.client.loop_start()
+
+        test_index = 0
+
+        interval_config = {
+            "interval_seconds": interval_seconds,
+            "rounds_per_interval": rounds_per_interval,
+            "total_intervals": total_intervals,
+            "delay_between_rounds": delay_between_rounds
+        }
+
+        while True:
+            # Check if total intervals reached
+            if total_intervals is not None and test_index >= total_intervals:
+                self.logger.info(f"Completed {test_index} intervals. Stopping.")
+                break
+
+            # Run single federated learning session
+            success = self._run_single_batch_test(config, test_index + 1, expected_clients, base_path, interval_config)
+            
+            if self.state.stop_requested:
+                self.logger.debug("Stopping processing due to stop request")
+                break
+
+            if not success:
+                self.logger.error(f"Interval training #{test_index + 1} failed.")
+            else:
+                self.logger.info(f"Interval training #{test_index + 1} completed successfully.")
+            
+            test_index += 1
+
+            # Wait for next interval if not stopping and (forever OR not reached limit)
+            should_wait = not self.state.stop_requested
+            if total_intervals is not None and test_index >= total_intervals:
+                should_wait = False
+            
+            if should_wait:
+                self.logger.info(f"Waiting {interval_seconds}s before next interval")
+                # Wait in 1s increments to allow checking for stop signal
+                wait_time = int(interval_seconds)
+                for _ in range(wait_time):
+                    if self.state.stop_requested:
+                        break
+                    sleep(1)
+                
+                # Handle fractional seconds if any
+                if not self.state.stop_requested and interval_seconds > wait_time:
+                    sleep(interval_seconds - wait_time)
+        
+        # Final cleanup
+        self._cleanup_federated_learning()
+        
+
     def _validate_test_config(self, test_config, test_number):
         """Validate individual test configuration"""
         required_fields = ['epochs', 'layers', 'activationFunctions', 'learningRateWeights', 'learningRateBiases', 'seed']
@@ -1035,20 +1480,60 @@ class MQTTFederatedServer:
         if not isinstance(test_config['seed'], int):
             self.logger.error(f"Test {test_number}: 'seed' must be an integer")
             return False
+
+        for field in ('database', 'dataset', 'datasetKey', 'datasetBin', 'datasetMeta'):
+            if field in test_config and not isinstance(test_config[field], str):
+                self.logger.error(f"Test {test_number}: '{field}' must be a string when provided")
+                return False
         
         return True
+
+    def _resolve_batch_config_path(self, batch_config_path):
+        """Resolve batch config paths relative to the server's batch-config folder."""
+        if os.path.isabs(batch_config_path):
+            return batch_config_path
+
+        direct_path = os.path.abspath(batch_config_path)
+        if os.path.exists(direct_path):
+            return direct_path
+
+        if os.path.dirname(batch_config_path):
+            candidate = os.path.join(BATCH_CONFIG_FOLDER, batch_config_path)
+        else:
+            candidate = os.path.join(BATCH_CONFIG_FOLDER, os.path.basename(batch_config_path))
+
+        return os.path.abspath(candidate)
+
+    def _build_dataset_selection(self, test_config):
+        """Extract optional dataset selection fields from a batch test config."""
+        dataset = test_config.get('database') or test_config.get('dataset') or test_config.get('datasetKey')
+        if not isinstance(dataset, str) or not dataset.strip():
+            return {}
+
+        selection = {'dataset': dataset.strip()}
+        dataset_bin = test_config.get('datasetBin')
+        dataset_meta = test_config.get('datasetMeta')
+        if isinstance(dataset_bin, str) and dataset_bin.strip():
+            selection['datasetBin'] = dataset_bin.strip()
+        if isinstance(dataset_meta, str) and dataset_meta.strip():
+            selection['datasetMeta'] = dataset_meta.strip()
+        return selection
     
-    def _run_single_batch_test(self, test_config, test_number, expected_clients, batch_base_path=None):
+    def _run_single_batch_test(self, test_config, test_number, expected_clients, base_path=None, interval_config=None):
         """Run a single federated learning test from batch configuration"""
         
         try:
             # Initialize federated learning state for this test
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            test_name = test_config.get('name', f'batch_test_{test_number}')
+            test_name = ""
+            if interval_config is not None:
+                test_name = f'interval_{test_number}'
+            else:
+                test_name = test_config.get('name', f'batch_test_{test_number}')
             
             # Use batch_base_path if provided (for batch mode), otherwise use WEIGHTS_FOLDER (for single mode)
-            if batch_base_path:
-                self.state.federated_path = os.path.join(batch_base_path, f"{timestamp}_{test_name}")
+            if base_path:
+                self.state.federated_path = os.path.join(base_path, f"{timestamp}_{test_name}")
             else:
                 self.state.federated_path = os.path.join(WEIGHTS_FOLDER, f"{timestamp}_{test_name}")
             self.state.current_round = 0
@@ -1057,7 +1542,11 @@ class MQTTFederatedServer:
             # self.state.connected_clients.clear()
             
             # Extract configuration
-            max_rounds = test_config.get('rounds', 1)  # Default to 1 round if not specified
+            max_rounds = 0
+            if interval_config is not None:
+                max_rounds = interval_config['rounds_per_interval']
+            else:
+                max_rounds = test_config.get('rounds', 1)  # Default to 1 round if not specified
             
             self.logger.info(f"⚙️ Test {test_number} configuration: {test_name}")
             self.logger.info(f"   Epochs: {test_config['epochs']}, Rounds: {max_rounds}")
@@ -1084,9 +1573,6 @@ class MQTTFederatedServer:
                 self._send_command(json.dumps(join_command, separators=(',', ':')))
                 sleep(COMMAND_RETRY_INTERVAL)
             
-            # Wait for devices to respond to join command (they'll populate federated_clients)
-            sleep(2)
-            
             if len(self.state.federated_clients) < 1:
                 self.logger.error(f"Test {test_number}: No clients joined federation")
                 return False
@@ -1112,6 +1598,7 @@ class MQTTFederatedServer:
                     "jsonWeights": test_config.get('sendJsonWeights', DEFAULT_SEND_JSON_WEIGHTS)
                 }
             }
+            start_command.update(self._build_dataset_selection(test_config))
             
             self.state.max_rounds = max_rounds
             
@@ -1128,7 +1615,11 @@ class MQTTFederatedServer:
             self._save_federated_config(start_command, test_config, test_number)
             
             # Run federated learning loop for this test
-            success = self._run_single_test_loop()
+            delay = 0
+            if interval_config is not None:
+                delay = interval_config.get('delay_between_rounds', 0)
+            
+            success = self._run_single_test_loop(delay_between_rounds=delay)
             
             if success:
                 # Finalize this test
@@ -1158,12 +1649,14 @@ class MQTTFederatedServer:
             except:
                 pass  # Ignore cleanup errors
     
-    def _run_single_test_loop(self):
+    def _run_single_test_loop(self, delay_between_rounds=0):
         """Run federated learning loop for a single batch test"""
         status_timer = 0
+        round_start_time = time.time()
         
         while True:
             sleep(1)
+            # self.logger.debug(f"Loop tick. Waiting: {len(self.state.waiting_for_clients)}")
             status_timer += 1
             
             # Check if stop was requested
@@ -1171,13 +1664,18 @@ class MQTTFederatedServer:
                 break
             
             # Check if all clients have submitted their models
-            if len(self.state.waiting_for_clients) == 0:
+            if len(self.state.waiting_for_clients) == 0 or (self.max_wait_time and time.time() - round_start_time >= self.max_wait_time):
                 if self.state.current_round + 1 > self.state.max_rounds:
                     self.logger.info(f"Round {self.state.current_round}/{self.state.max_rounds} complete - last round!")
                     self.aggregate_weights(self.state.current_round)
                     break
+
+                # If round_finished event returns False (e.g. from synchronous strategy waiting for parent), continue waiting
+                event_result = self.fire_event("round_finished", {"round": self.state.current_round})
+                if event_result is False:
+                    continue
                 
-                self.logger.info(f"Round {self.state.current_round}/{self.state.max_rounds} complete - all models received")
+                self.logger.info(f"Round {self.state.current_round}/{self.state.max_rounds} complete - {len(self.state.federated_clients) - len(self.state.waiting_for_clients)}/{len(self.state.federated_clients)} models received")
                 sleep(1)
                 
                 # Aggregate weights and send to clients
@@ -1185,6 +1683,15 @@ class MQTTFederatedServer:
                 if result is None:
                     self.logger.error("Failed to aggregate weights for this test.")
                     return False
+
+                # Delay between rounds if configured
+                if delay_between_rounds > 0:
+                    self.logger.info(f"Waiting {delay_between_rounds}s before next round...")
+                    initial_time = time.time()
+                    while time.time() - initial_time < delay_between_rounds:
+                        if self.state.stop_requested:
+                            break
+                        sleep(1)
                 
                 # Send binary aggregated weights to devices (unless paused)
                 aggregated_binary_path = os.path.join(
@@ -1258,7 +1765,7 @@ class MQTTFederatedServer:
         # Send end command
         end_command = {"command": "federate_end"}
         self._send_command(json.dumps(end_command, separators=(',', ':')))
-        sleep(2)  # Shorter wait between batch tests
+        sleep(3)  # Shorter wait between batch tests
         
         # Mark all federated clients as completed
         for client_id in self.state.federated_clients:
@@ -1373,7 +1880,7 @@ def main():
         
         # If no command line arguments, show usage message
         print("No command provided. Use --help to see available commands.")
-        print("For interactive mode, use the TUI: python server_tui.py")
+        print("For interactive mode, use the TUI: python -m atlantico_server.tui_runner")
                 
     except KeyboardInterrupt:
         print("\nExiting")

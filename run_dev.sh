@@ -16,7 +16,7 @@ CONSOLE_PID=$!
 
 # Run the TUI with hot reload enabled
 # echo "Starting TUI with CSS hot reload..."
-textual run --dev server_tui.py
+textual run --dev atlantico_server/tui_runner.py
 
 # Clean up console when done
 kill $CONSOLE_PID 2>/dev/null

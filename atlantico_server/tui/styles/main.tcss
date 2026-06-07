@@ -192,7 +192,16 @@ ActivityFeedPanel #activity-log {
 /*  FEDERATED LEARNING SCREEN                  */
 /* ============================================ */
 
+FederatedScreen .main-layout {
+    overflow-y: auto; 
+}
+
 ConfigurationPanel {
+    height: auto;
+}
+
+ConfigurationPanel > * {
+    height: auto;
 }
 
 ConfigurationPanel Horizontal {
@@ -210,8 +219,21 @@ ConfigurationPanel .config-input {
     margin-right: 12;
 }
 
+ConfigurationPanel #select-training-type {
+    width: 100%;
+}
+
+#batch-file-tree {
+    height: 10;
+}
+
+TrainingControlPanel {
+    height: auto;
+}
+
 TrainingControlPanel .control-buttons {
     align-horizontal: center;
+    height: auto;
 }
 
 ProgressPanel {
@@ -270,7 +292,12 @@ MetricsPanel {
 /* ============================================ */
 /*  SETTINGS SCREEN                             */
 /* ============================================ */
+SettingsScreen .panel {
+    height: auto;
+}
+
 SettingsScreen .panel > * {
+    margin-bottom: 1;
 }
 
 #switch-show-date {

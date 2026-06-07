@@ -3,7 +3,7 @@
 import struct
 import numpy as np
 import traceback
-from .logging import get_logger
+from .log_setup import get_logger
 
 def read_nn_binary_with_activation(filepath, logger=None):
     """
@@ -17,7 +17,7 @@ def read_nn_binary_with_activation(filepath, logger=None):
         logger: Optional logger instance (defaults to module logger)
     """
     if logger is None:
-        logger = get_logger(__name__)
+        logger = get_logger()
     
     try:
         with open(filepath, 'rb') as f:

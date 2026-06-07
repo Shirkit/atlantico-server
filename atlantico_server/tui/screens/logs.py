@@ -133,7 +133,7 @@ class LogsScreen(Screen):
         # Get current settings
         search_term = search_input.value.lower()
         filter_level = level_select.value
-        show_date = self.app.display_config.get("show_date", False)
+        show_date = self.app.config.get("display", {}).get("show_date", False)
         
         # Check if we need to reload everything
         if (force_reload or 

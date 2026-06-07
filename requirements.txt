@@ -12,5 +12,6 @@ textual>=0.47.0
 textual_plotext
 
 # Optional (used by some scripts if present):
+pydantic>=2.12.5
 # pandas>=1.5.0
 # scikit-learn>=1.0.0

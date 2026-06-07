@@ -1,6 +1,24 @@
 {
-  "theme": "textual-dark",
-  "display_config": {
+  "display": {
     "show_date": false
-  }
+  },
+  "theme": "dark",
+  "mqtt": {
+    "topic_prefix": "rasp"
+  },
+  "hierarchical": {
+    "enabled": false,
+    "parent_prefix": "aggregator",
+    "process_type": "AsynchronousStrategy",
+    "merge_strategy": "AfterRoundEndHalfWeightStrategy",
+    "aggregation_algorithm": "FedAvgStrategy"
+  },
+  "clients": "10",
+  "batch_config_file": "/home/shirkit/Projects/atlantico-server/batch-config/batch_35k_dataset2.json",
+  "interval": "2",
+  "rounds_per_interval": "5",
+  "total_intervals": "",
+  "delay_between_rounds": "3",
+  "training_type": "batch_config",
+  "max_wait_time": "900"
 }

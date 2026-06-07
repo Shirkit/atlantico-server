@@ -4,7 +4,6 @@ weights/
 metrics/
 metrics*/*
 parse_all/
-batch-config/
 compose/mosquitto/data/
 compose/mosquitto/log/
 

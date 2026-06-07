@@ -119,7 +119,7 @@ def _load_json_data(found_files):
 
 def _generate_all_plots(json_data, metrics_folder):
     """Generate all plots with error handling."""
-    metrics_to_plot = ["meanSqrdError", "accuracy", "precision", "recall", "f1Score"]
+    metrics_to_plot = ["meanSqrdError", "accuracy", "precision", "recall", "f1Score", "balancedAccuracy", "balancedPrecision", "balancedRecall", "balancedF1Score"]
     
     # Generate average metrics plot
     plot_average_metrics(json_data, metrics_folder, metrics_to_plot)
@@ -1069,7 +1069,7 @@ def plot_batch_comparison(batch_folder, metrics_folder=None):
     
     # Load data from all tests
     all_test_data = {}
-    metrics_to_plot = ["accuracy", "precision", "f1Score", "recall", "meanSqrdError"]
+    metrics_to_plot = ["accuracy", "precision", "f1Score", "recall", "meanSqrdError", "balancedAccuracy", "balancedPrecision", "balancedRecall", "balancedF1Score"]
     
     for test_name, parse_path in test_folders:
         logger.debug(f"Processing test: {test_name}")

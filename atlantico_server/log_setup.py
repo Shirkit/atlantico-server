@@ -47,13 +47,17 @@ def setup_logging(debug: bool = False, enable_stdout: bool = True) -> logging.Lo
     
     # Get or create the server logger
     logger = logging.getLogger('atlantico_server')
+    # Prevent duplicate messages by disabling propagation to the root logger
+    logger.propagate = False
     
-    # Prevent duplicate handlers
-    if logger.handlers:
-        # If we are requesting debug, ensure level is debug even if previously set to info
-        if debug:
-            logger.setLevel(logging.DEBUG)
-        return logger
+    # Clear existing handlers to prevent duplicates
+    for h in logger.handlers[:]:
+        logger.removeHandler(h)
+    
+    # Also clear root handlers to prevent other libraries from cluttering the log
+    rl = logging.getLogger()
+    for h in rl.handlers[:]:
+        rl.removeHandler(h)
 
     # Set level based on debug flag
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
