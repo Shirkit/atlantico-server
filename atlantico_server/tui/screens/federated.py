@@ -339,7 +339,8 @@ class FederatedScreen(Screen):
                     self.server.start_batch_federated_learning(batch_file, expected_clients=clients)
             except Exception as e:
                 import traceback
-                traceback.print_exc()
+                self._log_message(f"❌ Error in training thread: {e}")
+                self._log_message(traceback.format_exc())
             finally:
                 # Reset button states when done
                 self.app.call_from_thread(self.control_panel.set_training_state, False)
@@ -360,8 +361,8 @@ class FederatedScreen(Screen):
     def _log_message(self, message: str):
         """Helper to log messages (if logger available)"""
         try:
-            from atlantico_server.logging import get_logger
-            logger = get_logger(__name__)
+            from atlantico_server.log_setup import get_logger
+            logger = get_logger('atlantico_server')
             logger.info(message)
         except:
             pass

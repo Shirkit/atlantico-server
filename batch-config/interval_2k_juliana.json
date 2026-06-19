@@ -1,0 +1,13 @@
+{
+    "name": "interval_2k_juliana",
+    "epochs": 1,
+    "layers": [10, 50, 25, 12, 6, 2],
+    "activationFunctions": [1, 1, 1, 1, 6],
+    "learningRateWeights": 0.0625,
+    "learningRateBiases": 0.0125,
+    "seed": 42,
+    "dataset": "shards_5",
+    "datasetBin": "",
+    "datasetMeta": "",
+    "sendJsonWeights": false
+}

@@ -19,4 +19,4 @@ fi
 
 echo "Starting server using Python: $($PY -V 2>&1)" >&2
 
-exec "$PY" -m atlantico_server.server "$@"
+exec "$PY" -m atlantico_server.tui_runner "$@"

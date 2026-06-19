@@ -29,7 +29,7 @@ def main():
     # Initialize the MQTT federated server with logging to file only (no stdout in TUI mode)
     server = None
     try:
-        server = MQTTFederatedServer(debug=False, enable_stdout=False)
+        server = MQTTFederatedServer(debug=True, enable_stdout=False)
         # from atlantico_server.parser import plot_batch_comparison
         # plot_batch_comparison("/home/shirkit/Projects/atlantico-server/weights/batch_2025-12-29_12-34-23")
         # server.parse_all_training_data("/home/shirkit/Projects/atlantico-server/weights/batch_2025-12-29_12-34-23")

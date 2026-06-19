@@ -22,7 +22,7 @@ textual console
 
 2. In another terminal, run the TUI with dev mode:
 ```bash
-.venv/bin/textual run --dev server_tui.py:create_app
+.venv/bin/textual run --dev atlantico_server/tui_runner.py:create_app
 ```
 
 Now you can edit `atlantico_server/tui/styles/main.tcss` and changes will apply instantly without restarting!
@@ -30,5 +30,5 @@ Now you can edit `atlantico_server/tui/styles/main.tcss` and changes will apply 
 ## Notes
 
 - The `--dev` flag is what enables CSS hot reload
-- The `create_app()` factory function in `server_tui.py` is used instead of direct execution
-- Do NOT use `python server_tui.py` directly - it won't enable hot reload
+- The `create_app()` factory function in `atlantico_server/tui_runner.py` is used instead of direct execution
+- Do NOT use `python -m atlantico_server.tui_runner` directly - it won't enable hot reload

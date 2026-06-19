@@ -36,7 +36,7 @@ def read_nn_binary_with_activation(filepath, logger=None):
         layers = []
         
         for layer_idx in range(num_layers):
-            logger.debug(f"\n--- Layer {layer_idx} ---")
+            #logger.debug(f"\n--- Layer {layer_idx} ---")
             
             # Try to detect if activation function byte is present
             # We'll use heuristics: reasonable activation value (0-6) and sensible layer dimensions
@@ -214,7 +214,7 @@ def read_nn_binary_with_activation(filepath, logger=None):
                 'activation_byte': activation_byte
             })
                 
-        logger.debug(f"\nTotal bytes read: {offset}/{len(data)}")
+        #logger.debug(f"\nTotal bytes read: {offset}/{len(data)}")
         
         if offset != len(data):
             logger.debug(f"WARNING: {len(data) - offset} bytes remaining in file")

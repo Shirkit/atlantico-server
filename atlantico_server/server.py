@@ -292,10 +292,11 @@ class MQTTFederatedServer:
         with open(filepath, 'wb') as f:
             f.write(payload)
         
-        # Update federated client progress
-        json_filepath = filepath.replace(".nn", ".json")
-        if os.path.exists(json_filepath) and client_name in self.state.federated_clients:
-            self.state.federated_clients[client_name]['progress'] = 'Done'
+        # Update federated client progress tracking
+        if client_name in self.state.federated_clients:
+            self.state.federated_clients[client_name]['received_nn'] = True
+            if self.state.federated_clients[client_name].get('received_json', False):
+                self.state.federated_clients[client_name]['progress'] = 'Done'
             self.state.federated_clients[client_name]['last_update'] = time.time()
             
     def _handle_model_message(self, payload):
@@ -534,10 +535,11 @@ class MQTTFederatedServer:
             # Ensure directory exists
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-            # Update federated client progress if NN file exists
-            nn_filepath = filepath.replace(".json", ".nn")
-            if os.path.exists(nn_filepath) and client_name in self.state.federated_clients:
-                self.state.federated_clients[client_name]['progress'] = 'Done'
+            # Update federated client progress tracking
+            if client_name in self.state.federated_clients:
+                self.state.federated_clients[client_name]['received_json'] = True
+                if self.state.federated_clients[client_name].get('received_nn', False):
+                    self.state.federated_clients[client_name]['progress'] = 'Done'
                 self.state.federated_clients[client_name]['last_update'] = time.time()
             
             try:
@@ -1340,29 +1342,41 @@ class MQTTFederatedServer:
         self.logger.info("Starting Interval-Based Federated Learning")
 
         # Load batch configuration
-        try:
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-        except FileNotFoundError:
-            self.logger.error(f"Configuration file not found: {config_file}")
-            return
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Error decoding JSON: {e}")
-            return
+        if not config_file:
+            config = {
+                "epochs": DEFAULT_EPOCHS,
+                "layers": DEFAULT_LAYERS,
+                "activationFunctions": DEFAULT_ACTIVATION_FUNCTIONS,
+                "learningRateWeights": DEFAULT_LEARNING_RATE_WEIGHTS,
+                "learningRateBiases": DEFAULT_LEARNING_RATE_BIASES,
+                "seed": DEFAULT_RANDOM_SEED,
+                "sendJsonWeights": DEFAULT_SEND_JSON_WEIGHTS
+            }
+            self.logger.info("No configuration file specified. Using default/placeholder hyperparameters.")
+        else:
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+            except FileNotFoundError:
+                self.logger.error(f"Configuration file not found: {config_file}")
+                return
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Error decoding JSON: {e}")
+                return
         
         if not isinstance(config, dict):
             self.logger.error("Configuration must be a test dict")
             return
         
-        if rounds_per_interval is None or isinstance(rounds_per_interval, int) == False and rounds_per_interval <= 0:
+        if rounds_per_interval is None or not isinstance(rounds_per_interval, int) or rounds_per_interval <= 0:
             self.logger.error("rounds_per_interval must be a positive integer")
             return
         
-        if interval_seconds is None or isinstance(interval_seconds, int) == False and interval_seconds <= 0:
+        if interval_seconds is None or not isinstance(interval_seconds, int) or interval_seconds <= 0:
             self.logger.error("interval_seconds must be a positive integer")
             return
         
-        if delay_between_rounds is None or isinstance(delay_between_rounds, int) == False or delay_between_rounds < 0:
+        if delay_between_rounds is None or not isinstance(delay_between_rounds, int) or delay_between_rounds < 0:
             self.logger.error("delay_between_rounds must be a non-negative integer")
             return
 
@@ -1607,6 +1621,8 @@ class MQTTFederatedServer:
             for client_id in self.state.federated_clients:
                 self.state.federated_clients[client_id]['round'] = 1
                 self.state.federated_clients[client_id]['progress'] = 'Training'
+                self.state.federated_clients[client_id]['received_json'] = False
+                self.state.federated_clients[client_id]['received_nn'] = False
                 self.state.federated_clients[client_id]['last_update'] = time.time()
             
             self._send_command(json.dumps(start_command, separators=(',', ':')))
@@ -1713,10 +1729,7 @@ class MQTTFederatedServer:
                     
                     self.logger.info("Training resumed - sending aggregated weights")
                 
-                self._send_binary_file(aggregated_binary_path)
-                sleep(1)
-                
-                # Prepare for next round
+                # Prepare for next round BEFORE sending weights to clients to avoid race conditions
                 self.state.current_round += 1
                 next_round_dir = os.path.join(self.state.federated_path, str(self.state.current_round))
                 os.makedirs(next_round_dir, exist_ok=True)
@@ -1725,9 +1738,15 @@ class MQTTFederatedServer:
                 for client_id in self.state.federated_clients:
                     self.state.federated_clients[client_id]['round'] = self.state.current_round
                     self.state.federated_clients[client_id]['progress'] = 'Training'
+                    self.state.federated_clients[client_id]['received_json'] = False
+                    self.state.federated_clients[client_id]['received_nn'] = False
                     self.state.federated_clients[client_id]['last_update'] = time.time()
                 
-                self.logger.debug(f"Weights sent. Starting round {self.state.current_round}")
+                self.logger.debug(f"Starting round {self.state.current_round}")
+                
+                self._send_binary_file(aggregated_binary_path)
+                self.logger.debug("Weights sent.")
+                sleep(1)
                 status_timer = 0
 
             elif status_timer == STATUS_UPDATE_INTERVAL - 5:
