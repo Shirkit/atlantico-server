@@ -125,7 +125,8 @@ class MQTTFederatedServer:
             "enabled": False,
             "parent_prefix": "aggregator",
             "process_type": "latest_asynchronous",
-            "merge_strategy": "next_round_50_percent"
+            "merge_strategy": "next_round_50_percent",
+            "sliding_window": 10
         }
         self.max_wait_time = None
         self._update_topics()
@@ -191,6 +192,23 @@ class MQTTFederatedServer:
 
     def update_hierarchical_config(self, config):
         """Update hierarchical configuration"""
+        # If the mode is changing from enabled to disabled, unsubscribe from parent topics
+        was_enabled = self.hierarchical_config.get("enabled", False)
+        self.hierarchical_config.update(config)
+        is_enabled = self.hierarchical_config.get("enabled", False)
+        
+        if was_enabled and not is_enabled:
+            if hasattr(self, 'TOPIC_RECEIVE_FROM_PARENT'):
+                try:
+                    self.client.unsubscribe([
+                        self.TOPIC_RECEIVE_FROM_PARENT,
+                        self.TOPIC_RECEIVE_FROM_PARENT_RAW,
+                        self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT
+                    ])
+                    self.logger.info("Unsubscribed from parent topics because hierarchical mode was disabled.")
+                except Exception as e:
+                    self.logger.warning(f"Failed to unsubscribe from parent topics: {e}")
+                    
         self._setup_strategies()
         self._update_topics()
 
@@ -332,6 +350,13 @@ class MQTTFederatedServer:
         """Handle commands from parent aggregator"""
         try:
             command_data = json.loads(payload)
+            
+            # If "client" target is specified, ignore if it is not us
+            target_client = command_data.get("client")
+            if target_client is not None and target_client != self.client_id:
+                # Targeted command not for us, ignore it
+                return
+                
             command = command_data.get("command")
             
             if command == "federate_alive":
@@ -340,6 +365,10 @@ class MQTTFederatedServer:
             elif command == "federate_start":
                 self.logger.info("Received start command from parent aggregator")
                 # Ideally we would start our own federation here, but for now just log
+                config = command_data.get("config", {})
+                if "sliding_window" in config:
+                    self.hierarchical_config["sliding_window"] = config["sliding_window"]
+                    self.logger.info(f"Updated sliding_window to {config['sliding_window']} from parent config")
             elif command == "request_model":
                 self.push_model_to_parent()
             elif command == "federate_join":
@@ -347,6 +376,10 @@ class MQTTFederatedServer:
                 self.join_parent()
             elif command == "federate_unsubscribe":
                 self.logger.info("Received unsubscribe command from parent aggregator")
+            elif command in ("federate_end", "federate_stop"):
+                self.logger.info(f"Received {command} command from parent aggregator. Disabling parent connection.")
+                self.hierarchical_config["enabled"] = False
+                self.update_hierarchical_config(self.hierarchical_config)
                 
         except Exception as e:
             self.logger.error(f"Error handling parent command: {e}")
@@ -391,6 +424,12 @@ class MQTTFederatedServer:
         if self.hierarchical_config["enabled"]:
             self.logger.info(f"Joining parent aggregator as {self.client_id}")
             self._send_to_parent({"command": "join", "client": self.client_id}, is_command=True)
+
+    def leave_parent(self):
+        """Send leave command to parent aggregator"""
+        if self.hierarchical_config["enabled"]:
+            self.logger.info(f"Leaving parent aggregator as {self.client_id}")
+            self._send_to_parent({"command": "leave", "client": self.client_id}, is_command=True)
 
     def push_model_to_parent(self, model_path=None):
         """Push aggregated model to parent aggregator"""
@@ -469,6 +508,16 @@ class MQTTFederatedServer:
             del self.state.federated_clients[client_id]
             self.logger.info(f"Client {client_id} left federation. "
                       f"Federated clients: {len(self.state.federated_clients)}")
+            
+            # Orchestrate standalone fallback on the parent
+            if len(self.state.federated_clients) == 1:
+                last_client_id = list(self.state.federated_clients.keys())[0]
+                self.logger.info(f"Only one client remaining ({last_client_id}). Sending targeted federate_end command.")
+                end_command = {
+                    "command": "federate_end",
+                    "client": last_client_id
+                }
+                self._send_command(json.dumps(end_command, separators=(',', ':')))
     
     def _handle_resume_command(self, client_id):
         """Handle client resume notifications"""
@@ -994,6 +1043,7 @@ class MQTTFederatedServer:
     
     def _cleanup_federated_learning(self):
         """Clean up federated learning state"""
+        self.leave_parent()
         self.state.reset()
     
     def pause_federated_learning(self):
@@ -1174,17 +1224,20 @@ class MQTTFederatedServer:
         # NN configuration (layers, etc) set up, or they will receive it from their own config.
         # However, we still send a start command to signal the beginning of the process.
         # We pass minimal config to satisfy protocol if needed.
+        config_dict = aggregation_config.get("config", {
+             "layers": DEFAULT_LAYERS, # Default or placeholder
+             "actvFunctions": DEFAULT_ACTIVATION_FUNCTIONS,
+             "epochs": DEFAULT_EPOCHS,
+             "learningRateOfWeights": DEFAULT_LEARNING_RATE_WEIGHTS,
+             "learningRateOfBiases": DEFAULT_LEARNING_RATE_BIASES,
+             "randomSeed": DEFAULT_RANDOM_SEED,
+             "jsonWeights": DEFAULT_SEND_JSON_WEIGHTS
+        }).copy()
+        config_dict["sliding_window"] = self.hierarchical_config.get("sliding_window", 10)
+        
         start_command = {
             "command": "federate_start",
-            "config": aggregation_config.get("config", {
-                 "layers": DEFAULT_LAYERS, # Default or placeholder
-                 "actvFunctions": DEFAULT_ACTIVATION_FUNCTIONS,
-                 "epochs": DEFAULT_EPOCHS,
-                 "learningRateOfWeights": DEFAULT_LEARNING_RATE_WEIGHTS,
-                 "learningRateOfBiases": DEFAULT_LEARNING_RATE_BIASES,
-                 "randomSeed": DEFAULT_RANDOM_SEED,
-                 "jsonWeights": DEFAULT_SEND_JSON_WEIGHTS
-            })
+            "config": config_dict
         }
         
         # Set max rounds to infinite (or very large) if not specified, 
@@ -1637,7 +1690,8 @@ class MQTTFederatedServer:
                     "learningRateOfWeights": test_config['learningRateWeights'],
                     "learningRateOfBiases": test_config['learningRateBiases'],
                     "randomSeed": test_config['seed'],
-                    "jsonWeights": test_config.get('sendJsonWeights', DEFAULT_SEND_JSON_WEIGHTS)
+                    "jsonWeights": test_config.get('sendJsonWeights', DEFAULT_SEND_JSON_WEIGHTS),
+                    "sliding_window": self.hierarchical_config.get("sliding_window", 10)
                 }
             }
             start_command.update(self._build_dataset_selection(test_config))

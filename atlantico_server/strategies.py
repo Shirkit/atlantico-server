@@ -101,9 +101,17 @@ class BoundedAsynchronousStrategy(BaseStrategy):
     def round_finished(self, data):
         """Limit local rounds to parent_models_received + window_size"""
         local_round = data.get("round", 0)
+        
+        # If hierarchical mode is disabled (parent terminated or disconnected), do not wait
+        if self.server and hasattr(self.server, 'hierarchical_config') and not self.server.hierarchical_config.get("enabled", False):
+            return True
+
         window_size = 10
         if self.server and hasattr(self.server, 'hierarchical_config'):
             window_size = self.server.hierarchical_config.get("sliding_window", 10)
+        
+        if window_size is None:
+            return True
         
         # If we are more than window_size rounds ahead of the parent, wait
         if local_round - self.parent_models_received > window_size:
