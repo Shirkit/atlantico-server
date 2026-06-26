@@ -149,6 +149,8 @@ class LogsScreen(Screen):
             self._last_show_date = show_date
         
         if not os.path.exists(self.log_file):
+            if self.line_count == 0:
+                log_widget.write("Waiting for log file to be created...")
             return
             
         try:
@@ -159,8 +161,17 @@ class LogsScreen(Screen):
                 log_widget.clear()
                 self.line_count = 0
             
+            # If this is the initial load (position is 0), limit how much we load
+            is_initial_load = (self.last_position == 0)
+            
             with open(self.log_file, "r", encoding="utf-8") as f:
-                f.seek(self.last_position)
+                if is_initial_load and current_size > 300000:
+                    f.seek(current_size - 300000)
+                    # Discard the first partial line
+                    f.readline()
+                else:
+                    f.seek(self.last_position)
+                
                 new_lines = f.readlines()
                 self.last_position = f.tell()
                 
@@ -194,26 +205,3 @@ class LogsScreen(Screen):
                 
         except Exception as e:
             count_widget.update(f"Error reading logs: {str(e)}")
-        
-        if not os.path.exists(self.log_file):
-            if self.line_count == 0:
-                log_widget.write("Waiting for log file to be created...")
-            return
-        
-        try:
-            with open(self.log_file, 'r') as f:
-                f.seek(self.last_position)
-                new_lines = f.readlines()
-                
-                if new_lines:
-                    for line in new_lines:
-                        # Strip milliseconds from display: [HH:MM:SS.mmm] -> [HH:MM:SS]
-                        display_line = re.sub(r'\[(\d{2}:\d{2}:\d{2})\.\d{3}\]', r'[\1]', line.rstrip())
-                        log_widget.write(display_line, scroll_end=scroll_end)
-                        self.line_count += 1
-                    
-                    self.last_position = f.tell()
-                    count_widget.update(f"{self.log_file} - {self.line_count} lines")
-        except Exception as e:
-            if self.line_count == 0:
-                log_widget.write(f"Error reading log file: {e}")
