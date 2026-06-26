@@ -44,6 +44,8 @@ class SettingsScreen(Screen):
             Checkbox("Enable Hierarchical Mode", value=self.app.config["hierarchical"]["enabled"], id="switch-hierarchical"),
             Label("Parent Topic Prefix:", classes="config-label"),
             Select([("aggregator", "aggregator")], value=self.app.config["hierarchical"]["parent_prefix"], id="select-parent-prefix", allow_blank=False),
+            Label("Sliding Window Size (Bounded Asynchronous):", classes="config-label"),
+            Input(str(self.app.config["hierarchical"].get("sliding_window", 10)), id="input-sliding-window", placeholder="Default: 10"),
             classes="panel"
         )
         hierarchical_container.border_title = "Hierarchical Federation"
@@ -86,6 +88,17 @@ class SettingsScreen(Screen):
                 self.app.notify("Please enter a valid non-negative integer for Maximum Waiting Time.", severity="error")
                 return
             self.app._save_config()
+        elif event.input.id == "input-sliding-window":
+            value = event.value.strip()
+            try:
+                int_value = int(value)
+                if int_value < 1:
+                    raise ValueError
+                self.app.config["hierarchical"]["sliding_window"] = int_value
+                self.app._save_config()
+            except ValueError:
+                self.app.notify("Please enter a valid positive integer for Sliding Window Size.", severity="error")
+                return
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         """Handle checkbox changes"""
