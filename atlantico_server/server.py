@@ -423,7 +423,16 @@ class MQTTFederatedServer:
         """Send join command to parent aggregator"""
         if self.hierarchical_config["enabled"]:
             self.logger.info(f"Joining parent aggregator as {self.client_id}")
-            self._send_to_parent({"command": "join", "client": self.client_id}, is_command=True)
+            join_payload = {
+                "command": "join",
+                "client": self.client_id,
+                "config": {
+                    "process_type": self.hierarchical_config.get("process_type"),
+                    "merge_strategy": self.hierarchical_config.get("merge_strategy"),
+                    "aggregation_algorithm": self.hierarchical_config.get("aggregation_algorithm"),
+                }
+            }
+            self._send_to_parent(join_payload, is_command=True)
 
     def leave_parent(self):
         """Send leave command to parent aggregator"""
@@ -474,7 +483,7 @@ class MQTTFederatedServer:
     def _handle_federated_command(self, command, client_id, command_data):
         """Handle federated learning specific commands"""
         if command == "join":
-            self._handle_join_command(client_id)
+            self._handle_join_command(client_id, command_data)
         elif command == "leave":
             self._handle_leave_command(client_id)
         elif command == "resume":
@@ -483,7 +492,7 @@ class MQTTFederatedServer:
             # Always track alive status for all devices, regardless of federation participation
             self._handle_alive_command(client_id, auto_discover=True)
     
-    def _handle_join_command(self, client_id):
+    def _handle_join_command(self, client_id, command_data=None):
         """Handle client join requests for federation"""
         # Ensure device is tracked in connected_clients
         if client_id not in self.state.connected_clients:
@@ -491,15 +500,23 @@ class MQTTFederatedServer:
         else:
             self.state.connected_clients[client_id]['last_seen'] = time.time()
         
+        # Extract config from join command
+        client_config = {}
+        if command_data and "config" in command_data:
+            client_config = command_data["config"]
+        
         # Add to federated_clients if not already there (device wants to participate)
         if client_id not in self.state.federated_clients:
             self.state.federated_clients[client_id] = {
                 'round': self.state.current_round if self.state.current_round > 0 else 1,
                 'progress': 'Waiting',
-                'last_update': time.time()
+                'last_update': time.time(),
+                'config': client_config
             }
-            self.logger.info(f"Client {client_id} joined federation. "
+            self.logger.info(f"Client {client_id} joined federation with options {client_config}. "
                       f"Federated clients: {len(self.state.federated_clients)}")
+        else:
+            self.state.federated_clients[client_id]['config'] = client_config
     
     def _handle_leave_command(self, client_id):
         """Handle client leave notifications from federation"""
@@ -518,6 +535,22 @@ class MQTTFederatedServer:
                     "client": last_client_id
                 }
                 self._send_command(json.dumps(end_command, separators=(',', ':')))
+
+    def _check_client_strategy_alignment(self):
+        """Check if connected child clients match our strategy and issue warnings if not"""
+        our_strategy = self.hierarchical_config.get("process_type")
+        if self.topic_prefix == "aggregator" and our_strategy == "BoundedAsynchronousStrategy":
+            mismatched_clients = []
+            for client_id, info in self.state.federated_clients.items():
+                client_config = info.get("config", {})
+                client_strategy = client_config.get("process_type")
+                if client_strategy != "BoundedAsynchronousStrategy":
+                    mismatched_clients.append(client_id)
+            
+            if mismatched_clients:
+                msg = f"Warning: Bounded Asynchronous Strategy is active, but child aggregators {mismatched_clients} are not configured in bounded async mode."
+                self.logger.warning(msg)
+                self.fire_event("on_warning", {"message": msg})
     
     def _handle_resume_command(self, client_id):
         """Handle client resume notifications"""
@@ -1220,6 +1253,7 @@ class MQTTFederatedServer:
                        f"({len(self.state.connected_clients)} total connected)")
         
         # 3. Send Start Command
+        self._check_client_strategy_alignment()
         # Note: In hierarchical mode, we trust that child aggregators already have their
         # NN configuration (layers, etc) set up, or they will receive it from their own config.
         # However, we still send a start command to signal the beginning of the process.
@@ -1685,6 +1719,8 @@ class MQTTFederatedServer:
             
             self.logger.info(f"Test {test_number} started with {len(self.state.federated_clients)} federated clients "
                            f"({len(self.state.connected_clients)} total connected)")
+            
+            self._check_client_strategy_alignment()
             
             # Create start command with test-specific configuration
             start_command = {

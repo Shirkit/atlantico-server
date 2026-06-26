@@ -144,6 +144,9 @@ class ServerApp(App):
         self._load_config()
         
         if self.server:
+            # Register server warning event listener
+            self.server.register_event_handler("on_warning", self.handle_server_warning)
+            
             # Fix: correctly access topic_prefix from nested config
             prefix = self.config.get('mqtt', {}).get('topic_prefix', 'esp32')
             self.server.update_topic_prefix(prefix)
@@ -189,6 +192,12 @@ class ServerApp(App):
         except Exception:
             pass
     
+    def handle_server_warning(self, data):
+        """Handle server warning event and show a toast notification"""
+        message = data.get("message", "")
+        if message:
+            self.notify(message, severity="warning", timeout=6.0)
+
     def watch_theme(self, theme: str) -> None:
         """Save theme when it changes"""
         self.config['theme'] = theme
