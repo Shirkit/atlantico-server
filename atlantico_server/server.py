@@ -78,6 +78,7 @@ class FederatedServerState:
         self.current_test_index = 0
         self.total_tests = 0
         self.current_test_name = ""
+        self.active_config = None
     
     @property
     def waiting_for_clients(self):
@@ -99,6 +100,7 @@ class FederatedServerState:
         self.current_test_index = 0
         self.total_tests = 0
         self.current_test_name = ""
+        self.active_config = None
 
 
 from .strategies import Strategies
@@ -316,6 +318,8 @@ class MQTTFederatedServer:
                 
             if self.state.is_federated:
                 self._handle_federated_command(command, client_id, command_data)
+            elif command == "resume":
+                self._handle_resume_inactive(client_id)
             elif command == "alive":
                 self._handle_alive_command(client_id)
             else:
@@ -469,7 +473,6 @@ class MQTTFederatedServer:
     def _handle_resume_command(self, client_id):
         """Handle client resume notifications"""
         if client_id in self.state.connected_clients:
-            # if client_id in self.state.connected_clients and client_id in self.state.federated_clients and self.state.waiting_for_clients and client_id in self.state.waiting_for_clients:
             self.logger.info(f"Client {client_id} is ready to continue")
             try:
                 resume_command = {
@@ -477,6 +480,9 @@ class MQTTFederatedServer:
                     "client": client_id,
                     "round": self.state.current_round
                 }
+                if self.state.active_config is not None:
+                    resume_command["config"] = self.state.active_config
+
                 self._send_command(json.dumps(resume_command, separators=(',', ':')))
                 
                 # Try to send binary .nn file first, fallback to JSON
@@ -501,6 +507,16 @@ class MQTTFederatedServer:
                 
             except Exception as e:
                 self.logger.error(f"Sending weights file: {e}")
+
+    def _handle_resume_inactive(self, client_id):
+        """Send a negative resume reply to indicate that no training session is running"""
+        self.logger.info(f"Client {client_id} requested resume, but no active federation is running. Sending stop command.")
+        response = {
+            "command": "federate_stop",
+            "client": client_id,
+            "reason": "no_active_session"
+        }
+        self._send_command(json.dumps(response, separators=(',', ':')))
     
     def _handle_alive_command(self, client_id, auto_discover=True):
         """Handle alive messages"""
@@ -954,6 +970,17 @@ class MQTTFederatedServer:
             "device_count": len(self.state.federated_clients),
             "bits": "32",
             "run": "X",
+            "server": {
+                "client_id": self.client_id,
+                "broker_host": BROKER_IP,
+                "broker_port": BROKER_PORT,
+                "topic_prefix": self.topic_prefix,
+                "hierarchical": {
+                    "enabled": self.hierarchical_config.get("enabled", False),
+                    "parent_prefix": self.hierarchical_config.get("parent_prefix"),
+                    "client_id": self.hierarchical_config.get("client_id")
+                }
+            }
         })
         
         config_path = os.path.join(self.state.federated_path, "config.json")
@@ -1169,6 +1196,7 @@ class MQTTFederatedServer:
             self.state.federated_clients[client_id]['progress'] = 'Waiting' 
             self.state.federated_clients[client_id]['last_update'] = time.time()
         
+        self.state.active_config = start_command.get("config")
         self._send_command(json.dumps(start_command, separators=(',', ':')))
         
         # Save configuration
@@ -1625,6 +1653,7 @@ class MQTTFederatedServer:
                 self.state.federated_clients[client_id]['received_nn'] = False
                 self.state.federated_clients[client_id]['last_update'] = time.time()
             
+            self.state.active_config = start_command.get("config")
             self._send_command(json.dumps(start_command, separators=(',', ':')))
             
             # Save configuration with batch test info

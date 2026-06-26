@@ -80,6 +80,46 @@ class AsynchronousStrategy(BaseStrategy):
     def GetType(self):
         return "process_type"
 
+class BoundedAsynchronousStrategy(BaseStrategy):
+    """
+    Process Type Strategy: Bounded Asynchronous
+    Allows asynchronous training but limits the child to being at most N rounds ahead of the parent aggregator.
+    """
+    def __init__(self, server):
+        super().__init__(server)
+        self.parent_models_received = 0
+
+    def setup(self):
+        self.server.register_event_handler("on_parent_model_received", self.on_parent_model_received, priority=5)
+        self.server.register_event_handler("on_round_aggregation_completed", self.on_round_aggregation_completed, priority=5)
+
+    def on_parent_model_received(self, data):
+        self.parent_models_received += 1
+        if self.logger:
+            self.logger.info(f"Strategy: Bounded Asynchronous parent model received ({self.parent_models_received} total)")
+
+    def round_finished(self, data):
+        """Limit local rounds to parent_models_received + window_size"""
+        local_round = data.get("round", 0)
+        window_size = 10
+        if self.server and hasattr(self.server, 'hierarchical_config'):
+            window_size = self.server.hierarchical_config.get("sliding_window", 10)
+        
+        # If we are more than window_size rounds ahead of the parent, wait
+        if local_round - self.parent_models_received > window_size:
+            if self.logger:
+                self.logger.info(f"Strategy: Bounded Asynchronous waiting (local round {local_round} is > {window_size} rounds ahead of parent)")
+            return False
+        return True
+
+    def on_round_aggregation_completed(self, data):
+        """Strategy: Push aggregated model to parent immediately after aggregation"""
+        if self.server and hasattr(self.server, 'hierarchical_config') and self.server.hierarchical_config["enabled"]:
+            self.server.push_model_to_parent(data.get("model_path"))
+
+    def GetType(self):
+        return "process_type"
+
 class AfterRoundEndHalfWeightStrategy(BaseStrategy):
     """
     Merge Strategy: After Round End (50%)
