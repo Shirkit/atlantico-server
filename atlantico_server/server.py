@@ -536,21 +536,7 @@ class MQTTFederatedServer:
                 }
                 self._send_command(json.dumps(end_command, separators=(',', ':')))
 
-    def _check_client_strategy_alignment(self):
-        """Check if connected child clients match our strategy and issue warnings if not"""
-        our_strategy = self.hierarchical_config.get("process_type")
-        if self.topic_prefix == "aggregator" and our_strategy == "BoundedAsynchronousStrategy":
-            mismatched_clients = []
-            for client_id, info in self.state.federated_clients.items():
-                client_config = info.get("config", {})
-                client_strategy = client_config.get("process_type")
-                if client_strategy != "BoundedAsynchronousStrategy":
-                    mismatched_clients.append(client_id)
-            
-            if mismatched_clients:
-                msg = f"Warning: Bounded Asynchronous Strategy is active, but child aggregators {mismatched_clients} are not configured in bounded async mode."
-                self.logger.warning(msg)
-                self.fire_event("on_warning", {"message": msg})
+
     
     def _handle_resume_command(self, client_id):
         """Handle client resume notifications"""
@@ -1253,7 +1239,7 @@ class MQTTFederatedServer:
                        f"({len(self.state.connected_clients)} total connected)")
         
         # 3. Send Start Command
-        self._check_client_strategy_alignment()
+        self.fire_event("on_federation_started")
         # Note: In hierarchical mode, we trust that child aggregators already have their
         # NN configuration (layers, etc) set up, or they will receive it from their own config.
         # However, we still send a start command to signal the beginning of the process.
@@ -1720,7 +1706,7 @@ class MQTTFederatedServer:
             self.logger.info(f"Test {test_number} started with {len(self.state.federated_clients)} federated clients "
                            f"({len(self.state.connected_clients)} total connected)")
             
-            self._check_client_strategy_alignment()
+            self.fire_event("on_federation_started")
             
             # Create start command with test-specific configuration
             start_command = {

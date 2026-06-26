@@ -92,6 +92,23 @@ class BoundedAsynchronousStrategy(BaseStrategy):
     def setup(self):
         self.server.register_event_handler("on_parent_model_received", self.on_parent_model_received, priority=5)
         self.server.register_event_handler("on_round_aggregation_completed", self.on_round_aggregation_completed, priority=5)
+        self.server.register_event_handler("on_federation_started", self.on_federation_started, priority=5)
+
+    def on_federation_started(self, data):
+        """Check if connected child clients match our strategy and issue warnings if not"""
+        if self.server and self.server.topic_prefix == "aggregator":
+            mismatched_clients = []
+            for client_id, info in self.server.state.federated_clients.items():
+                client_config = info.get("config", {})
+                client_strategy = client_config.get("process_type")
+                if client_strategy != "BoundedAsynchronousStrategy":
+                    mismatched_clients.append(client_id)
+            
+            if mismatched_clients:
+                msg = f"Warning: Bounded Asynchronous Strategy is active, but child aggregators {mismatched_clients} are not configured in bounded async mode."
+                if self.logger:
+                    self.logger.warning(msg)
+                self.server.fire_event("on_warning", {"message": msg})
 
     def on_parent_model_received(self, data):
         self.parent_models_received += 1
