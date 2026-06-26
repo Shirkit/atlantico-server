@@ -126,7 +126,7 @@ class MQTTFederatedServer:
             "parent_prefix": "aggregator",
             "process_type": "latest_asynchronous",
             "merge_strategy": "next_round_50_percent",
-            "sliding_window": 10
+            "sliding_window": None
         }
         self.max_wait_time = None
         self._update_topics()
@@ -1233,7 +1233,13 @@ class MQTTFederatedServer:
              "randomSeed": DEFAULT_RANDOM_SEED,
              "jsonWeights": DEFAULT_SEND_JSON_WEIGHTS
         }).copy()
-        config_dict["sliding_window"] = self.hierarchical_config.get("sliding_window", 10)
+        
+        sliding_window = self.hierarchical_config.get("sliding_window")
+        if sliding_window is not None and sliding_window != "":
+            try:
+                config_dict["sliding_window"] = int(sliding_window)
+            except ValueError:
+                pass
         
         start_command = {
             "command": "federate_start",
@@ -1690,10 +1696,16 @@ class MQTTFederatedServer:
                     "learningRateOfWeights": test_config['learningRateWeights'],
                     "learningRateOfBiases": test_config['learningRateBiases'],
                     "randomSeed": test_config['seed'],
-                    "jsonWeights": test_config.get('sendJsonWeights', DEFAULT_SEND_JSON_WEIGHTS),
-                    "sliding_window": self.hierarchical_config.get("sliding_window", 10)
+                    "jsonWeights": test_config.get('sendJsonWeights', DEFAULT_SEND_JSON_WEIGHTS)
                 }
             }
+            
+            sliding_window = self.hierarchical_config.get("sliding_window")
+            if sliding_window is not None and sliding_window != "":
+                try:
+                    start_command["config"]["sliding_window"] = int(sliding_window)
+                except ValueError:
+                    pass
             start_command.update(self._build_dataset_selection(test_config))
             
             self.state.max_rounds = max_rounds

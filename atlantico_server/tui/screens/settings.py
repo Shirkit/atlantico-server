@@ -42,10 +42,10 @@ class SettingsScreen(Screen):
 
         hierarchical_container = Vertical(
             Checkbox("Enable Hierarchical Mode", value=self.app.config["hierarchical"]["enabled"], id="switch-hierarchical"),
-            Label("Parent Topic Prefix:", classes="config-label"),
+            Label("Parent Topic Prefix:", classes="config-label", id="label-parent-prefix"),
             Select([("aggregator", "aggregator")], value=self.app.config["hierarchical"]["parent_prefix"], id="select-parent-prefix", allow_blank=False),
-            Label("Sliding Window Size (Bounded Asynchronous):", classes="config-label"),
-            Input(str(self.app.config["hierarchical"].get("sliding_window", 10)), id="input-sliding-window", placeholder="Default: 10"),
+            Label("Sliding Window Size (Bounded Asynchronous):", classes="config-label", id="label-sliding-window"),
+            Input(str(self.app.config["hierarchical"].get("sliding_window", "") or ""), id="input-sliding-window", placeholder="Default: 10"),
             classes="panel"
         )
         hierarchical_container.border_title = "Hierarchical Federation"
@@ -90,6 +90,10 @@ class SettingsScreen(Screen):
             self.app._save_config()
         elif event.input.id == "input-sliding-window":
             value = event.value.strip()
+            if value == "":
+                self.app.config["hierarchical"]["sliding_window"] = ""
+                self.app._save_config()
+                return
             try:
                 int_value = int(value)
                 if int_value < 1:
@@ -100,6 +104,32 @@ class SettingsScreen(Screen):
                 self.app.notify("Please enter a valid positive integer for Sliding Window Size.", severity="error")
                 return
 
+    def on_mount(self) -> None:
+        """Call update_visibility when settings screen is mounted"""
+        self.update_visibility()
+
+    def update_visibility(self) -> None:
+        """Dynamically show/hide fields based on configuration values"""
+        try:
+            hierarchical_enabled = self.app.config["hierarchical"]["enabled"]
+            
+            # Show/hide Parent Topic Prefix widgets
+            self.query_one("#label-parent-prefix").display = hierarchical_enabled
+            self.query_one("#select-parent-prefix").display = hierarchical_enabled
+            
+            # Show/hide Sliding Window widgets based on:
+            # - Client topic prefix == "aggregator"
+            # - Sync Strategy == "BoundedAsynchronousStrategy"
+            client_prefix = self.app.config["mqtt"]["topic_prefix"]
+            process_type = self.app.config["hierarchical"]["process_type"]
+            
+            show_sliding = (client_prefix == "aggregator" and process_type == "BoundedAsynchronousStrategy")
+            
+            self.query_one("#label-sliding-window").display = show_sliding
+            self.query_one("#input-sliding-window").display = show_sliding
+        except Exception:
+            pass
+
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         """Handle checkbox changes"""
         if event.checkbox.id == "switch-show-date":
@@ -108,6 +138,7 @@ class SettingsScreen(Screen):
         elif event.checkbox.id == "switch-hierarchical":
             self.app.config["hierarchical"]["enabled"] = event.value
             self.app._save_config()
+            self.update_visibility()
             self.app.notify("A server restart is required to apply hierarchical settings.")
             
     def on_select_changed(self, event: Select.Changed) -> None:
@@ -115,6 +146,7 @@ class SettingsScreen(Screen):
         if event.select.id == "select-topic-prefix" and event.value != self.app.config["mqtt"]["topic_prefix"]:
             self.app.config["mqtt"]["topic_prefix"] = event.value
             self.app._save_config()
+            self.update_visibility()
             self.app.notify(f"A server restart is required to apply the new topic prefix.")
         elif event.select.id == "select-parent-prefix" and event.value != self.app.config["hierarchical"]["parent_prefix"]:
             self.app.config["hierarchical"]["parent_prefix"] = event.value
@@ -123,6 +155,7 @@ class SettingsScreen(Screen):
         elif event.select.id == "select-process-type" and event.value != self.app.config["hierarchical"]["process_type"]:
             self.app.config["hierarchical"]["process_type"] = event.value
             self.app._save_config()
+            self.update_visibility()
             self.app.notify("A server restart is required to apply hierarchical settings.")
         elif event.select.id == "select-merge-strategy" and event.value != self.app.config["hierarchical"]["merge_strategy"]:
             self.app.config["hierarchical"]["merge_strategy"] = event.value

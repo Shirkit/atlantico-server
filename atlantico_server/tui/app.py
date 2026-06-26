@@ -114,7 +114,7 @@ class ServerApp(App):
                 "process_type": "AsynchronousStrategy",
                 "merge_strategy": "AfterRoundEndHalfWeightStrategy",
                 "aggregation_algorithm": "FedAvgStrategy",
-                "sliding_window": 10,
+                "sliding_window": "",
             },
             "clients": "",
             "batch_config_file": "",

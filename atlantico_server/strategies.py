@@ -108,10 +108,16 @@ class BoundedAsynchronousStrategy(BaseStrategy):
 
         window_size = 10
         if self.server and hasattr(self.server, 'hierarchical_config'):
-            window_size = self.server.hierarchical_config.get("sliding_window", 10)
-        
-        if window_size is None:
-            return True
+            val = self.server.hierarchical_config.get("sliding_window")
+            if val is not None and val != "":
+                try:
+                    window_size = int(val)
+                except ValueError:
+                    window_size = 10
+            else:
+                window_size = 10
+        else:
+            window_size = 10
         
         # If we are more than window_size rounds ahead of the parent, wait
         if local_round - self.parent_models_received > window_size:
