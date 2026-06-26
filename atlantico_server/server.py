@@ -540,41 +540,52 @@ class MQTTFederatedServer:
     
     def _handle_resume_command(self, client_id):
         """Handle client resume notifications"""
-        if client_id in self.state.connected_clients:
-            self.logger.info(f"Client {client_id} is ready to continue")
-            try:
-                resume_command = {
-                    "command": "federate_resume",
-                    "client": client_id,
-                    "round": self.state.current_round
-                }
-                if self.state.active_config is not None:
-                    resume_command["config"] = self.state.active_config
+        # Only allow resuming if the client is actively registered as part of the current federated learning session
+        if client_id not in self.state.federated_clients:
+            self.logger.warning(f"Client {client_id} requested resume, but was not part of the active federated session. Rejecting.")
+            self._handle_resume_inactive(client_id)
+            return
 
-                self._send_command(json.dumps(resume_command, separators=(',', ':')))
-                
-                # Try to send binary .nn file first, fallback to JSON
-                aggregated_binary_path = os.path.join(
+        # Ensure client is marked as connected/seen
+        if client_id not in self.state.connected_clients:
+            self.state.connected_clients[client_id] = {'last_seen': time.time()}
+        else:
+            self.state.connected_clients[client_id]['last_seen'] = time.time()
+            
+        self.logger.info(f"Client {client_id} is ready to continue")
+        try:
+            resume_command = {
+                "command": "federate_resume",
+                "client": client_id,
+                "round": self.state.current_round
+            }
+            if self.state.active_config is not None:
+                resume_command["config"] = self.state.active_config
+
+            self._send_command(json.dumps(resume_command, separators=(',', ':')))
+            
+            # Try to send binary .nn file first, fallback to JSON
+            aggregated_binary_path = os.path.join(
+                self.state.federated_path,
+                str(self.state.current_round - 1),
+                "aggregated_weights.nn"
+            )
+            
+            if os.path.exists(aggregated_binary_path):
+                self.logger.debug(f"Sending binary resume file to {client_id}")
+                self._send_binary_file(aggregated_binary_path, f"{self.TOPIC_RESUME_TO_DEVICES_RAW}/{client_id}")
+            else:
+                # Fallback to JSON if binary file doesn't exist
+                aggregated_json_path = os.path.join(
                     self.state.federated_path,
                     str(self.state.current_round - 1),
-                    "aggregated_weights.nn"
+                    "aggregated_weights.json"
                 )
-                
-                if os.path.exists(aggregated_binary_path):
-                    self.logger.debug(f"Sending binary resume file to {client_id}")
-                    self._send_binary_file(aggregated_binary_path, f"{self.TOPIC_RESUME_TO_DEVICES_RAW}/{client_id}")
-                else:
-                    # Fallback to JSON if binary file doesn't exist
-                    aggregated_json_path = os.path.join(
-                        self.state.federated_path,
-                        str(self.state.current_round - 1),
-                        "aggregated_weights.json"
-                    )
-                    self.logger.debug(f"Binary file not found, sending JSON to {client_id}")
-                    self._send_file(aggregated_json_path, self.TOPIC_RESUME_TO_DEVICES)
-                
-            except Exception as e:
-                self.logger.error(f"Sending weights file: {e}")
+                self.logger.debug(f"Binary file not found, sending JSON to {client_id}")
+                self._send_file(aggregated_json_path, self.TOPIC_RESUME_TO_DEVICES)
+            
+        except Exception as e:
+            self.logger.error(f"Sending weights file: {e}")
 
     def _handle_resume_inactive(self, client_id):
         """Send a negative resume reply to indicate that no training session is running"""
