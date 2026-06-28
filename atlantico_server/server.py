@@ -73,6 +73,9 @@ class FederatedServerState:
         self.is_paused = False
         self.paused_aggregated_path = None  # Store path to aggregated weights when paused
         self.stop_requested = False  # Flag to gracefully stop federated learning
+        self.waiting_for_parent_start = False
+        self.parent_start_allowed = False
+        self.last_active_clients = []
         
         # Batch progress tracking
         self.current_test_index = 0
@@ -364,11 +367,15 @@ class MQTTFederatedServer:
                 self._send_to_parent({"command": "alive", "client": self.client_id}, is_command=True)
             elif command == "federate_start":
                 self.logger.info("Received start command from parent aggregator")
-                # Ideally we would start our own federation here, but for now just log
                 config = command_data.get("config", {})
                 if "sliding_window" in config:
                     self.hierarchical_config["sliding_window"] = config["sliding_window"]
                     self.logger.info(f"Updated sliding_window to {config['sliding_window']} from parent config")
+                
+                # Release wait gate if waiting
+                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
+                    self.state.parent_start_allowed = True
+                    self.state.waiting_for_parent_start = False
             elif command == "request_model":
                 self.push_model_to_parent()
             elif command == "federate_join":
@@ -376,13 +383,23 @@ class MQTTFederatedServer:
                 self.join_parent()
             elif command == "federate_unsubscribe":
                 self.logger.info("Received unsubscribe command from parent aggregator")
+                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
+                    self.logger.info("Received federate_unsubscribe from parent while waiting. Cancelling wait.")
+                    self.state.parent_start_allowed = False
+                    self.state.waiting_for_parent_start = False
             elif command == "federate_stop" or (command == "federate_end" and target_client is not None):
                 self.logger.info(f"Received {command} command (targeted/stop) from parent aggregator. Disabling parent connection.")
+                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
+                    self.state.parent_start_allowed = False
+                    self.state.waiting_for_parent_start = False
                 new_config = self.hierarchical_config.copy()
                 new_config["enabled"] = False
                 self.update_hierarchical_config(new_config)
             elif command == "federate_end":
                 self.logger.info("Received federate_end command from parent aggregator. Finalizing current test.")
+                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
+                    self.state.parent_start_allowed = False
+                    self.state.waiting_for_parent_start = False
                 
         except Exception as e:
             self.logger.error(f"Error handling parent command: {e}")
@@ -1657,7 +1674,7 @@ class MQTTFederatedServer:
     
     def _run_single_batch_test(self, test_config, test_number, expected_clients, base_path=None, interval_config=None):
         """Run a single federated learning test from batch configuration"""
-        
+        original_enabled = self.hierarchical_config.get("enabled", False)
         try:
             # Initialize federated learning state for this test
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -1711,6 +1728,22 @@ class MQTTFederatedServer:
                 self._send_command(json.dumps(join_command, separators=(',', ':')))
                 sleep(COMMAND_RETRY_INTERVAL)
             
+            # If expected_clients is not specified (blank/None), calculate expected_clients dynamically
+            # based on which clients from the last test are still active on the network.
+            if expected_clients is None or expected_clients <= 0:
+                if hasattr(self.state, 'last_active_clients') and self.state.last_active_clients:
+                    # Filter last active clients by checking if they are still alive (seen in last 45 seconds)
+                    alive_last_active = [cid for cid in self.state.last_active_clients
+                                         if cid in self.state.connected_clients and
+                                         time.time() - self.state.connected_clients[cid].get('last_seen', 0) < 45]
+                    
+                    if len(alive_last_active) >= 1:
+                        expected_clients = len(alive_last_active)
+                        self.logger.info(
+                            f"Test {test_number}: Dynamically expected clients: {expected_clients} "
+                            f"(alive from previous test: {alive_last_active})"
+                        )
+
             if len(self.state.federated_clients) < 1:
                 self.logger.error(f"Test {test_number}: No clients joined federation")
                 return False
@@ -1759,6 +1792,36 @@ class MQTTFederatedServer:
                 self.state.federated_clients[client_id]['last_update'] = time.time()
             
             self.state.active_config = start_command.get("config")
+            
+            # If wait_for_parent_start is enabled, pause here until parent aggregator releases the gate
+            if original_enabled and self.hierarchical_config.get("wait_for_parent_start", True):
+                self.logger.info("Waiting for federate_start command from parent aggregator before starting local training...")
+                self.state.waiting_for_parent_start = True
+                self.state.parent_start_allowed = False
+                
+                # Resend join command just in case (though join_parent was already triggered by parent's federate_join)
+                self.join_parent()
+                
+                # Wait in a loop until released or stopped
+                while self.state.waiting_for_parent_start and not self.state.stop_requested:
+                    sleep(0.5)
+                
+                if self.state.stop_requested:
+                    self.logger.info("Stop requested while waiting for parent aggregator. Aborting test.")
+                    return False
+                    
+                if not getattr(self.state, 'parent_start_allowed', False):
+                    # If parent aborted, check if we should continue locally/standalone or fail
+                    if self.hierarchical_config.get("continue_on_parent_abort", True):
+                        self.logger.warning("Parent aggregator aborted or disconnected. Falling back to standalone/local training.")
+                        # Temporarily disable hierarchical mode for this test so we proceed without parent
+                        self.hierarchical_config["enabled"] = False
+                    else:
+                        self.logger.error("Parent aggregator aborted the session. Skipping this test.")
+                        return False
+                else:
+                    self.logger.info("Received parent start signal. Starting local training!")
+
             self._send_command(json.dumps(start_command, separators=(',', ':')))
             
             # Save configuration with batch test info
@@ -1792,6 +1855,9 @@ class MQTTFederatedServer:
             traceback.print_exc()
             return False
         finally:
+            # Restore original hierarchical enabled status
+            if 'original_enabled' in locals():
+                self.hierarchical_config["enabled"] = original_enabled
             # Ensure cleanup happens even if test fails
             try:
                 self._send_unsubscribe_command()
@@ -1806,6 +1872,14 @@ class MQTTFederatedServer:
         
         while True:
             sleep(1)
+            
+            # Remove inactive client aggregators/devices (no ping in last 90s)
+            for client_id in list(self.state.federated_clients.keys()):
+                last_seen = self.state.connected_clients.get(client_id, {}).get('last_seen', 0)
+                if time.time() - last_seen > 90:
+                    self.logger.warning(f"Client {client_id} is inactive (no communication for 90s). Removing from federation.")
+                    del self.state.federated_clients[client_id]
+
             # self.logger.debug(f"Loop tick. Waiting: {len(self.state.waiting_for_clients)}")
             status_timer += 1
             
@@ -1912,6 +1986,9 @@ class MQTTFederatedServer:
     
     def _finalize_single_batch_test(self):
         """Finalize a single batch test"""
+        # Save last active clients
+        self.state.last_active_clients = list(self.state.federated_clients.keys())
+        
         # Create final round directory
         self.state.current_round += 1
         final_round_dir = os.path.join(self.state.federated_path, str(self.state.current_round))
