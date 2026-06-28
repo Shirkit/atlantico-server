@@ -43,6 +43,8 @@ class SynchronousStrategy(BaseStrategy):
     """
     def setup(self):
         self.server.register_event_handler("on_parent_model_received", self.on_parent_model_received, priority=5)
+        self.server.register_event_handler("round_finished", self.round_finished, priority=5)
+        self.server.register_event_handler("on_round_aggregation_completed", self.on_round_aggregation_completed, priority=5)
         self.parent_model_received = False
 
     def on_parent_model_received(self, data):
@@ -93,6 +95,7 @@ class BoundedAsynchronousStrategy(BaseStrategy):
         self.server.register_event_handler("on_parent_model_received", self.on_parent_model_received, priority=5)
         self.server.register_event_handler("on_round_aggregation_completed", self.on_round_aggregation_completed, priority=5)
         self.server.register_event_handler("on_federation_started", self.on_federation_started, priority=5)
+        self.server.register_event_handler("round_finished", self.round_finished, priority=5)
 
     def on_federation_started(self, data):
         """Check if connected child clients match our strategy and issue warnings if not"""
@@ -226,6 +229,7 @@ class OnRoundEndAsAnotherClientStrategy(BaseStrategy):
 
     def setup(self):
         self.server.register_event_handler("on_parent_model_received", self.on_parent_model_received, priority=5)
+        self.server.register_event_handler("on_round_aggregation_started", self.on_round_aggregation_started, priority=5)
         self.server.register_event_handler("on_round_aggregation_completed", self.on_round_aggregation_completed, priority=10)
 
     def on_parent_model_received(self, data):
