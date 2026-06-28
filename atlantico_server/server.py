@@ -376,10 +376,13 @@ class MQTTFederatedServer:
                 self.join_parent()
             elif command == "federate_unsubscribe":
                 self.logger.info("Received unsubscribe command from parent aggregator")
-            elif command in ("federate_end", "federate_stop"):
-                self.logger.info(f"Received {command} command from parent aggregator. Disabling parent connection.")
-                self.hierarchical_config["enabled"] = False
-                self.update_hierarchical_config(self.hierarchical_config)
+            elif command == "federate_stop" or (command == "federate_end" and target_client is not None):
+                self.logger.info(f"Received {command} command (targeted/stop) from parent aggregator. Disabling parent connection.")
+                new_config = self.hierarchical_config.copy()
+                new_config["enabled"] = False
+                self.update_hierarchical_config(new_config)
+            elif command == "federate_end":
+                self.logger.info("Received federate_end command from parent aggregator. Finalizing current test.")
                 
         except Exception as e:
             self.logger.error(f"Error handling parent command: {e}")
@@ -1547,7 +1550,8 @@ class MQTTFederatedServer:
                 break
 
             if not success:
-                self.logger.error(f"Interval training #{test_index + 1} failed.")
+                self.logger.error(f"Interval training #{test_index + 1} failed. Ending federative process.")
+                break
             else:
                 self.logger.info(f"Interval training #{test_index + 1} completed successfully.")
             
@@ -1670,6 +1674,8 @@ class MQTTFederatedServer:
                 self.state.federated_path = os.path.join(WEIGHTS_FOLDER, f"{timestamp}_{test_name}")
             self.state.current_round = 0
             self.state.is_federated = True
+            # Clear federated clients to start fresh for this test
+            self.state.federated_clients.clear()
             # Don't clear connected_clients - keep tracking all devices
             # self.state.connected_clients.clear()
             
