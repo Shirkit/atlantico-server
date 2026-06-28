@@ -65,7 +65,10 @@ class ServerStatusPanel(Container):
         device_widget.update(f"Connected Devices: {self.device_count}")
         
         if self.max_rounds > 0:
-            round_widget.update(f"Training Round: {self.current_round}/{self.max_rounds}")
+            if self.max_rounds >= 999999999:
+                round_widget.update(f"Training Round: {self.current_round}")
+            else:
+                round_widget.update(f"Training Round: {self.current_round}/{self.max_rounds}")
         else:
             round_widget.update("Training Round: Not started")
 

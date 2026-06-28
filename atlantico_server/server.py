@@ -1815,7 +1815,7 @@ class MQTTFederatedServer:
             
             # Check if all clients have submitted their models
             if len(self.state.waiting_for_clients) == 0 or (self.max_wait_time and time.time() - round_start_time >= self.max_wait_time):
-                if self.state.current_round + 1 > self.state.max_rounds:
+                if self.state.max_rounds and self.state.max_rounds < 999999999 and self.state.current_round + 1 > self.state.max_rounds:
                     self.logger.info(f"Round {self.state.current_round}/{self.state.max_rounds} complete - last round!")
                     self.aggregate_weights(self.state.current_round)
                     break
@@ -1825,7 +1825,8 @@ class MQTTFederatedServer:
                 if event_result is False:
                     continue
                 
-                self.logger.info(f"Round {self.state.current_round}/{self.state.max_rounds} complete - {len(self.state.federated_clients) - len(self.state.waiting_for_clients)}/{len(self.state.federated_clients)} models received")
+                max_r_str = f"/{self.state.max_rounds}" if (self.state.max_rounds and self.state.max_rounds < 999999999) else ""
+                self.logger.info(f"Round {self.state.current_round}{max_r_str} complete - {len(self.state.federated_clients) - len(self.state.waiting_for_clients)}/{len(self.state.federated_clients)} models received")
                 sleep(1)
                 
                 # Aggregate weights and send to clients
@@ -1900,7 +1901,8 @@ class MQTTFederatedServer:
         
         # Check if loop was broken due to stop request
         if self.state.stop_requested:
-            self.logger.info(f"Stop requested - ending round {self.state.current_round}/{self.state.max_rounds}")
+            max_r_str = f"/{self.state.max_rounds}" if (self.state.max_rounds and self.state.max_rounds < 999999999) else ""
+            self.logger.info(f"Stop requested - ending round {self.state.current_round}{max_r_str}")
             self.logger.debug("Sending unsubscribe command to devices")
             self._send_unsubscribe_command()
             sleep(2)  # Give time for devices to receive and process

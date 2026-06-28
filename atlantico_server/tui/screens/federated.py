@@ -194,8 +194,12 @@ class ProgressPanel(Container):
         max_rounds = state.max_rounds if state.max_rounds > 0 else 0
         
         if state.is_federated and max_rounds > 0:
-            round_bar.update(progress=current_round, total=max_rounds)
-            round_count.update(f"Rounds Completed: {current_round}/{max_rounds}")
+            if max_rounds >= 999999999:
+                round_bar.update(progress=0)  # No completion progress bar for infinite
+                round_count.update(f"Rounds Completed: {current_round}")
+            else:
+                round_bar.update(progress=current_round, total=max_rounds)
+                round_count.update(f"Rounds Completed: {current_round}/{max_rounds}")
         else:
             round_bar.update(progress=0)
             round_count.update("Rounds Completed: -/-")
