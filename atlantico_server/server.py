@@ -1902,7 +1902,10 @@ class MQTTFederatedServer:
             
 
 
-            self._send_command(json.dumps(start_command, separators=(',', ':')))
+            # Send start command multiple times to ensure robust receipt
+            for _ in range(3):
+                self._send_command(json.dumps(start_command, separators=(',', ':')))
+                sleep(2)
             
             # Save configuration with batch test info
             self._save_federated_config(start_command, test_config, test_number)
