@@ -389,24 +389,26 @@ class MQTTFederatedServer:
                 self._send_to_parent({"command": "alive", "client": self.client_id}, is_command=True)
             elif command == "federate_start":
                 self.logger.info("Received start command from parent aggregator")
-                config = command_data.get("config", {})
-                if "sliding_window" in config:
-                    self.hierarchical_config["sliding_window"] = config["sliding_window"]
-                    self.logger.info(f"Updated sliding_window to {config['sliding_window']} from parent config")
-                
-                # Save the parent's test config for dynamic overrides (rounds, etc.)
-                if hasattr(self, 'state'):
+                # Only process start command if we are actually waiting for the parent to start a test
+                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
+                    config = command_data.get("config", {})
+                    if "sliding_window" in config:
+                        self.hierarchical_config["sliding_window"] = config["sliding_window"]
+                        self.logger.info(f"Updated sliding_window to {config['sliding_window']} from parent config")
+                    
                     self.state.active_parent_config = config
-                
-                # Release wait gate if waiting
-                if hasattr(self, 'state'):
                     self.state.parent_command_status = "started"
                     self.state.waiting_for_parent_start = False
+                else:
+                    self.logger.info("Ignoring start command because we are not waiting for parent start (busy or inactive).")
             elif command == "request_model":
                 self.push_model_to_parent()
             elif command == "federate_join":
                 self.logger.info("Received join request from parent aggregator")
-                self.join_parent()
+                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
+                    self.join_parent()
+                else:
+                    self.logger.info("Ignoring join request because we are not waiting for parent start (busy or inactive).")
             elif command == "federate_unsubscribe":
                 self.logger.info("Received unsubscribe command from parent aggregator")
                 if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
@@ -1726,6 +1728,7 @@ class MQTTFederatedServer:
             self.client.subscribe(topics)
             self.logger.info("Re-subscribed to parent topics at test startup.")
             
+        self._setup_strategies()
         self.state.parent_command_status = "pending"
         self.state.waiting_for_parent_start = False
         try:
