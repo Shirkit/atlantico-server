@@ -54,7 +54,7 @@ DEFAULT_SEND_JSON_WEIGHTS = False
 # Timing constants
 CONNECTION_WAIT_TIME = 10
 COMMAND_RETRY_INTERVAL = 2
-COMMAND_RETRIES = 6
+COMMAND_RETRIES = 2
 STATUS_UPDATE_INTERVAL = 30
 
 
@@ -86,9 +86,23 @@ class FederatedServerState:
     
     @property
     def waiting_for_clients(self):
-        """Dynamically compute waiting clients from federated_clients progress"""
-        return [cid for cid, info in self.federated_clients.items() 
-                if info.get('progress') not in ('Done', 'Completed')]
+        """Dynamically compute waiting clients from file existence and status"""
+        waiting = []
+        import os
+        for cid, info in self.federated_clients.items():
+            if info.get('progress') in ('Done', 'Completed'):
+                continue
+                
+            # If the weights file for this client for the current round already exists on disk,
+            # it means the client has already uploaded its weights in advance (sliding window).
+            if self.federated_path and self.current_round:
+                nn_file = os.path.join(self.federated_path, str(self.current_round), f"{cid}.nn")
+                json_file = os.path.join(self.federated_path, str(self.current_round), f"{cid}.json")
+                if os.path.exists(nn_file) or os.path.exists(json_file):
+                    continue
+                    
+            waiting.append(cid)
+        return waiting
     
     def reset(self):
         """Reset server state"""
@@ -174,7 +188,7 @@ class MQTTFederatedServer:
         """Update MQTT topics based on prefix"""
         # Topics for my devices (I am the server)
         self.TOPIC_RECEIVE_FROM_DEVICES = f"{self.topic_prefix}/fl/model/push"
-        self.TOPIC_RECEIVE_FROM_DEVICES_RAW = f"{self.topic_prefix}/fl/model/rawpush/+"
+        self.TOPIC_RECEIVE_FROM_DEVICES_RAW = f"{self.topic_prefix}/fl/model/rawpush/#"
         self.TOPIC_SEND_TO_DEVICES = f"{self.topic_prefix}/fl/model/pull"
         self.TOPIC_SEND_TO_DEVICES_RAW = f"{self.topic_prefix}/fl/model/rawpull"
         self.TOPIC_RECEIVE_COMMANDS_FROM_DEVICES = f"{self.topic_prefix}/fl/commands/push"
@@ -301,10 +315,18 @@ class MQTTFederatedServer:
         """Handle raw neural network file uploads"""
         client_name = topic_parts[4]
         
+        # If round number is specified in topic parts, use it!
+        message_round = self.state.current_round
+        if len(topic_parts) > 5:
+            try:
+                message_round = int(topic_parts[5])
+            except ValueError:
+                pass
+        
         if self.state.is_federated:
             filepath = os.path.join(
                 self.state.federated_path, 
-                str(self.state.current_round), 
+                str(message_round), 
                 f"{client_name}.nn"
             )
         else:
@@ -372,6 +394,10 @@ class MQTTFederatedServer:
                 if "sliding_window" in config:
                     self.hierarchical_config["sliding_window"] = config["sliding_window"]
                     self.logger.info(f"Updated sliding_window to {config['sliding_window']} from parent config")
+                
+                # Save the parent's test config for dynamic overrides (rounds, etc.)
+                if hasattr(self, 'state'):
+                    self.state.active_parent_config = config
                 
                 # Release wait gate if waiting
                 if hasattr(self, 'state'):
@@ -464,18 +490,22 @@ class MQTTFederatedServer:
         """Push aggregated model to parent aggregator"""
         if not self.hierarchical_config["enabled"]:
             return
-
+ 
         if model_path is None:
             # Default to aggregated weights
              model_path = os.path.join(WEIGHTS_FOLDER, "aggregated_weights.nn")
              if self.state.is_federated:
-                 model_path = os.path.join(self.state.federated_path, str(self.state.current_round), "aggregated_weights.nn")
-
+                  model_path = os.path.join(self.state.federated_path, str(self.state.current_round), "aggregated_weights.nn")
+ 
         if os.path.exists(model_path):
             self.logger.info(f"Pushing model to parent: {model_path}")
             with open(model_path, "rb") as f:
                 content = f.read()
-                self._send_to_parent(content, is_command=False)
+                # Include round in raw push topic if federated
+                topic = self.TOPIC_SEND_TO_PARENT_RAW
+                if self.state.is_federated:
+                    topic = f"{topic}/{self.state.current_round}"
+                self._send_to_parent(content, is_command=False, topic=topic)
 
                 combined_metrics = {
                     "round": self.state.current_round,
@@ -555,6 +585,8 @@ class MQTTFederatedServer:
                     "client": last_client_id
                 }
                 self._send_command(json.dumps(end_command, separators=(',', ':')))
+                # Clear federated clients so parent's loop terminates immediately
+                self.state.federated_clients.clear()
 
 
     
@@ -638,10 +670,17 @@ class MQTTFederatedServer:
             
             client_name = output_data["data"]["client"]
             
+            message_round = self.state.current_round
+            if isinstance(loaded_data, dict) and "round" in loaded_data:
+                try:
+                    message_round = int(loaded_data["round"])
+                except ValueError:
+                    pass
+
             if self.state.is_federated:
                 filepath = os.path.join(
                     self.state.federated_path,
-                    str(self.state.current_round),
+                    str(message_round),
                     f"{client_name}.json"
                 )
             else:
@@ -1720,84 +1759,6 @@ class MQTTFederatedServer:
             os.makedirs(self.state.federated_path, exist_ok=True)
             os.makedirs(os.path.join(self.state.federated_path, str(self.state.current_round)), exist_ok=True)
             
-            # Wait for client connections
-            self.logger.debug(f"Waiting {CONNECTION_WAIT_TIME}s for device connections")
-
-            for i in range(COMMAND_RETRIES):
-                unsub_command = {"command": "federate_unsubscribe"}
-                self._send_command(json.dumps(unsub_command, separators=(',', ':')))
-                sleep(COMMAND_RETRY_INTERVAL)
-            
-            for i in range(COMMAND_RETRIES):
-                join_command = {"command": "federate_join"}
-                self._send_command(json.dumps(join_command, separators=(',', ':')))
-                sleep(COMMAND_RETRY_INTERVAL)
-            
-            # If expected_clients is not specified (blank/None), calculate expected_clients dynamically
-            # based on which clients from the last test are still active on the network.
-            if expected_clients is None or expected_clients <= 0:
-                if hasattr(self.state, 'last_active_clients') and self.state.last_active_clients:
-                    # Filter last active clients by checking if they are still alive (seen in last 45 seconds)
-                    alive_last_active = [cid for cid in self.state.last_active_clients
-                                         if cid in self.state.connected_clients and
-                                         time.time() - self.state.connected_clients[cid].get('last_seen', 0) < 45]
-                    
-                    if len(alive_last_active) >= 1:
-                        expected_clients = len(alive_last_active)
-                        self.logger.info(
-                            f"Test {test_number}: Dynamically expected clients: {expected_clients} "
-                            f"(alive from previous test: {alive_last_active})"
-                        )
-
-            if len(self.state.federated_clients) < 1:
-                self.logger.error(f"Test {test_number}: No clients joined federation")
-                return False
-            
-            if expected_clients and len(self.state.federated_clients) < expected_clients:
-                self.logger.error(f"Test {test_number}: {len(self.state.federated_clients)}/{expected_clients} clients joined (insufficient)")
-                self._send_unsubscribe_command()
-                return False
-            
-            self.logger.info(f"Test {test_number} started with {len(self.state.federated_clients)} federated clients "
-                           f"({len(self.state.connected_clients)} total connected)")
-            
-            self.fire_event("on_federation_started")
-            
-            # Create start command with test-specific configuration
-            start_command = {
-                "command": "federate_start",
-                "config": {
-                    "layers": test_config['layers'],
-                    "actvFunctions": test_config['activationFunctions'],
-                    "epochs": test_config['epochs'],
-                    "learningRateOfWeights": test_config['learningRateWeights'],
-                    "learningRateOfBiases": test_config['learningRateBiases'],
-                    "randomSeed": test_config['seed'],
-                    "jsonWeights": test_config.get('sendJsonWeights', DEFAULT_SEND_JSON_WEIGHTS)
-                }
-            }
-            
-            sliding_window = self.hierarchical_config.get("sliding_window")
-            if sliding_window is not None and sliding_window != "":
-                try:
-                    start_command["config"]["sliding_window"] = int(sliding_window)
-                except ValueError:
-                    pass
-            start_command.update(self._build_dataset_selection(test_config))
-            
-            self.state.max_rounds = max_rounds
-            
-            # Update federated clients that joined to Training status
-            # Note: federated_clients is now populated by join commands, not copied from connected_clients
-            for client_id in self.state.federated_clients:
-                self.state.federated_clients[client_id]['round'] = 1
-                self.state.federated_clients[client_id]['progress'] = 'Training'
-                self.state.federated_clients[client_id]['received_json'] = False
-                self.state.federated_clients[client_id]['received_nn'] = False
-                self.state.federated_clients[client_id]['last_update'] = time.time()
-            
-            self.state.active_config = start_command.get("config")
-            
             # If wait_for_parent_start is enabled, pause here until parent aggregator releases the gate
             if original_enabled and self.hierarchical_config.get("wait_for_parent_start", True):
                 status = getattr(self.state, 'parent_command_status', 'pending')
@@ -1843,6 +1804,103 @@ class MQTTFederatedServer:
                             return False
                     else:
                         self.logger.info("Received parent start signal. Starting local training!")
+            
+            # Override local rounds dynamically from the parent's configuration if provided
+            if original_enabled:
+                parent_config = getattr(self.state, 'active_parent_config', None) or {}
+                if parent_config.get("rounds"):
+                    try:
+                        max_rounds = int(parent_config["rounds"])
+                        self.logger.info(f"Overrode local rounds count to {max_rounds} from parent start command")
+                    except ValueError:
+                        pass
+
+            self.state.max_rounds = max_rounds
+            
+            # Create start command with test-specific configuration
+            start_command = {
+                "command": "federate_start",
+                "config": {
+                    "layers": test_config['layers'],
+                    "actvFunctions": test_config['activationFunctions'],
+                    "epochs": test_config['epochs'],
+                    "learningRateOfWeights": test_config['learningRateWeights'],
+                    "learningRateOfBiases": test_config['learningRateBiases'],
+                    "randomSeed": test_config['seed'],
+                    "rounds": max_rounds,
+                    "jsonWeights": test_config.get('sendJsonWeights', DEFAULT_SEND_JSON_WEIGHTS)
+                }
+            }
+            
+            # Read sliding window from test_config first, fallback to self.hierarchical_config
+            sliding_window = test_config.get("sliding_window") or self.hierarchical_config.get("sliding_window")
+            if sliding_window is not None and sliding_window != "":
+                try:
+                    start_command["config"]["sliding_window"] = int(sliding_window)
+                except ValueError:
+                    pass
+            start_command.update(self._build_dataset_selection(test_config))
+            
+            self.state.active_config = start_command.get("config")
+            
+            # If expected_clients is not specified (blank/None), calculate expected_clients dynamically
+            # based on which clients from the last test are still active on the network.
+            if expected_clients is None or expected_clients <= 0:
+                if hasattr(self.state, 'last_active_clients') and self.state.last_active_clients:
+                    # Filter last active clients by checking if they are still alive (seen in last 45 seconds)
+                    alive_last_active = [cid for cid in self.state.last_active_clients
+                                         if cid in self.state.connected_clients and
+                                         time.time() - self.state.connected_clients[cid].get('last_seen', 0) < 45]
+                    
+                    if len(alive_last_active) >= 1:
+                        expected_clients = len(alive_last_active)
+                        self.logger.info(
+                            f"Test {test_number}: Dynamically expected clients: {expected_clients} "
+                            f"(alive from previous test: {alive_last_active})"
+                        )
+
+
+            # Wait for client connections in a robust, step-driven loop
+            target_clients = expected_clients if (expected_clients and expected_clients > 0) else 1
+            max_wait_seconds = 120 if self.topic_prefix == "aggregator" else 15
+            self.logger.info(f"Waiting up to {max_wait_seconds}s for {target_clients} clients to join federation...")
+            
+            joined_successfully = False
+            last_join_broadcast = 0
+            
+            for elapsed in range(max_wait_seconds):
+                if self.state.stop_requested:
+                    break
+                    
+                # Re-broadcast join command every 3 seconds to ensure no messages are lost
+                if time.time() - last_join_broadcast >= 3:
+                    join_command = {"command": "federate_join"}
+                    self._send_command(json.dumps(join_command, separators=(',', ':')))
+                    last_join_broadcast = time.time()
+                    
+                if len(self.state.federated_clients) >= target_clients:
+                    joined_successfully = True
+                    self.logger.info(f"All expected clients joined after {elapsed}s.")
+                    break
+                    
+                sleep(1)
+                
+            if not joined_successfully and len(self.state.federated_clients) >= 1:
+                # If we didn't reach the target but have at least 1 client, and expected_clients wasn't strict
+                if not expected_clients:
+                    joined_successfully = True
+
+            if not joined_successfully:
+                self.logger.error(f"Test {test_number} failed: insufficient clients joined ({len(self.state.federated_clients)}/{target_clients})")
+                self._send_unsubscribe_command()
+                return False
+            
+            self.logger.info(f"Test {test_number} started with {len(self.state.federated_clients)} federated clients "
+                           f"({len(self.state.connected_clients)} total connected)")
+            
+            self.fire_event("on_federation_started")
+            
+
 
             self._send_command(json.dumps(start_command, separators=(',', ':')))
             
@@ -1882,6 +1940,7 @@ class MQTTFederatedServer:
                 self.hierarchical_config = original_config
             # Ensure cleanup happens even if test fails
             try:
+                self.leave_parent()
                 self._send_unsubscribe_command()
                 sleep(2)  # Give time for cleanup
             except:
@@ -1893,6 +1952,11 @@ class MQTTFederatedServer:
         round_start_time = time.time()
         
         while True:
+            # If all clients have completed or left (e.g. went standalone), end loop
+            if len(self.state.federated_clients) == 0:
+                self.logger.info("All clients have completed or left the federation. Ending test loop.")
+                break
+                
             sleep(1)
             
             # Remove inactive client aggregators/devices (no ping in last 90s)

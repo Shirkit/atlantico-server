@@ -98,6 +98,8 @@ class BoundedAsynchronousStrategy(BaseStrategy):
         self.server.register_event_handler("on_round_aggregation_completed", self.on_round_aggregation_completed, priority=5)
         self.server.register_event_handler("on_federation_started", self.on_federation_started, priority=5)
         self.server.register_event_handler("round_finished", self.round_finished, priority=5)
+        self.parent_models_received = 0
+        self.last_wait_log_time = 0
 
     def on_federation_started(self, data):
         """Check if connected child clients match our strategy and issue warnings if not"""
