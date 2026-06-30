@@ -16,8 +16,10 @@ def read_nn_binary_with_activation(filepath, logger=None):
         filepath: Path to the neural network binary file
         logger: Optional logger instance (defaults to module logger)
     """
+    import logging
     if logger is None:
-        logger = get_logger()
+        logger = get_logger('atlantico_server.reader')
+        logger.setLevel(logging.INFO)
     
     try:
         with open(filepath, 'rb') as f:
