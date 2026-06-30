@@ -44,6 +44,7 @@ class SettingsScreen(Screen):
             Checkbox("Enable Hierarchical Mode", value=self.app.config["hierarchical"]["enabled"], id="switch-hierarchical"),
             Label("Parent Topic Prefix:", classes="config-label", id="label-parent-prefix"),
             Select([("aggregator", "aggregator")], value=self.app.config["hierarchical"]["parent_prefix"], id="select-parent-prefix", allow_blank=False),
+            Checkbox("Wait for Parent Start Signal", value=self.app.config["hierarchical"].get("wait_for_parent_start", True), id="switch-wait-for-parent-start"),
             Label("Sliding Window Size (Bounded Asynchronous):", classes="config-label", id="label-sliding-window"),
             Input(str(self.app.config["hierarchical"].get("sliding_window", "") or ""), id="input-sliding-window", placeholder="Default: 10"),
             classes="panel"
@@ -116,6 +117,7 @@ class SettingsScreen(Screen):
             # Show/hide Parent Topic Prefix widgets
             self.query_one("#label-parent-prefix").display = hierarchical_enabled
             self.query_one("#select-parent-prefix").display = hierarchical_enabled
+            self.query_one("#switch-wait-for-parent-start").display = hierarchical_enabled
             
             # Show/hide Sliding Window widgets based on:
             # - Client topic prefix == "aggregator"
@@ -139,6 +141,10 @@ class SettingsScreen(Screen):
             self.app.config["hierarchical"]["enabled"] = event.value
             self.app._save_config()
             self.update_visibility()
+            self.app.notify("A server restart is required to apply hierarchical settings.")
+        elif event.checkbox.id == "switch-wait-for-parent-start":
+            self.app.config["hierarchical"]["wait_for_parent_start"] = event.value
+            self.app._save_config()
             self.app.notify("A server restart is required to apply hierarchical settings.")
             
     def on_select_changed(self, event: Select.Changed) -> None:

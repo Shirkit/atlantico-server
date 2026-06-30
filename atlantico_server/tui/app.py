@@ -115,6 +115,7 @@ class ServerApp(App):
                 "merge_strategy": "AfterRoundEndHalfWeightStrategy",
                 "aggregation_algorithm": "FedAvgStrategy",
                 "sliding_window": "",
+                "wait_for_parent_start": True,
             },
             "clients": "",
             "batch_config_file": "",

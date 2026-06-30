@@ -75,6 +75,7 @@ class FederatedServerState:
         self.stop_requested = False  # Flag to gracefully stop federated learning
         self.waiting_for_parent_start = False
         self.parent_start_allowed = False
+        self.parent_command_status = "pending"
         self.last_active_clients = []
         
         # Batch progress tracking
@@ -373,8 +374,8 @@ class MQTTFederatedServer:
                     self.logger.info(f"Updated sliding_window to {config['sliding_window']} from parent config")
                 
                 # Release wait gate if waiting
-                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
-                    self.state.parent_start_allowed = True
+                if hasattr(self, 'state'):
+                    self.state.parent_command_status = "started"
                     self.state.waiting_for_parent_start = False
             elif command == "request_model":
                 self.push_model_to_parent()
@@ -383,22 +384,21 @@ class MQTTFederatedServer:
                 self.join_parent()
             elif command == "federate_unsubscribe":
                 self.logger.info("Received unsubscribe command from parent aggregator")
-                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
-                    self.logger.info("Received federate_unsubscribe from parent while waiting. Cancelling wait.")
-                    self.state.parent_start_allowed = False
+                if hasattr(self, 'state'):
+                    self.state.parent_command_status = "canceled"
                     self.state.waiting_for_parent_start = False
             elif command == "federate_stop" or (command == "federate_end" and target_client is not None):
                 self.logger.info(f"Received {command} command (targeted/stop) from parent aggregator. Disabling parent connection.")
-                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
-                    self.state.parent_start_allowed = False
+                if hasattr(self, 'state'):
+                    self.state.parent_command_status = "canceled"
                     self.state.waiting_for_parent_start = False
                 new_config = self.hierarchical_config.copy()
                 new_config["enabled"] = False
                 self.update_hierarchical_config(new_config)
             elif command == "federate_end":
                 self.logger.info("Received federate_end command from parent aggregator. Finalizing current test.")
-                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
-                    self.state.parent_start_allowed = False
+                if hasattr(self, 'state'):
+                    self.state.parent_command_status = "canceled"
                     self.state.waiting_for_parent_start = False
                 
         except Exception as e:
@@ -1675,6 +1675,8 @@ class MQTTFederatedServer:
     def _run_single_batch_test(self, test_config, test_number, expected_clients, base_path=None, interval_config=None):
         """Run a single federated learning test from batch configuration"""
         original_enabled = self.hierarchical_config.get("enabled", False)
+        self.state.parent_command_status = "pending"
+        self.state.waiting_for_parent_start = False
         try:
             # Initialize federated learning state for this test
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -1795,32 +1797,44 @@ class MQTTFederatedServer:
             
             # If wait_for_parent_start is enabled, pause here until parent aggregator releases the gate
             if original_enabled and self.hierarchical_config.get("wait_for_parent_start", True):
-                self.logger.info("Waiting for federate_start command from parent aggregator before starting local training...")
-                self.state.waiting_for_parent_start = True
-                self.state.parent_start_allowed = False
+                status = getattr(self.state, 'parent_command_status', 'pending')
                 
-                # Resend join command just in case (though join_parent was already triggered by parent's federate_join)
-                self.join_parent()
-                
-                # Wait in a loop until released or stopped
-                while self.state.waiting_for_parent_start and not self.state.stop_requested:
-                    sleep(0.5)
-                
-                if self.state.stop_requested:
-                    self.logger.info("Stop requested while waiting for parent aggregator. Aborting test.")
-                    return False
-                    
-                if not getattr(self.state, 'parent_start_allowed', False):
-                    # If parent aborted, check if we should continue locally/standalone or fail
+                if status == "started":
+                    self.logger.info("Parent start signal already received. Proceeding to local training!")
+                elif status == "canceled":
+                    self.logger.warning("Parent aggregator already aborted/ended the session. Skipping start wait.")
                     if self.hierarchical_config.get("continue_on_parent_abort", True):
-                        self.logger.warning("Parent aggregator aborted or disconnected. Falling back to standalone/local training.")
-                        # Temporarily disable hierarchical mode for this test so we proceed without parent
+                        self.logger.warning("Falling back to standalone/local training.")
                         self.hierarchical_config["enabled"] = False
                     else:
-                        self.logger.error("Parent aggregator aborted the session. Skipping this test.")
                         return False
                 else:
-                    self.logger.info("Received parent start signal. Starting local training!")
+                    self.logger.info("Waiting for federate_start command from parent aggregator before starting local training...")
+                    self.state.waiting_for_parent_start = True
+                    
+                    # Resend join command just in case (though join_parent was already triggered by parent's federate_join)
+                    self.join_parent()
+                    
+                    # Wait in a loop until released or stopped
+                    while self.state.waiting_for_parent_start and not self.state.stop_requested:
+                        sleep(0.5)
+                    
+                    if self.state.stop_requested:
+                        self.logger.info("Stop requested while waiting for parent aggregator. Aborting test.")
+                        return False
+                        
+                    final_status = getattr(self.state, 'parent_command_status', 'pending')
+                    if final_status != "started":
+                        # If parent aborted, check if we should continue locally/standalone or fail
+                        if self.hierarchical_config.get("continue_on_parent_abort", True):
+                            self.logger.warning("Parent aggregator aborted or disconnected. Falling back to standalone/local training.")
+                            # Temporarily disable hierarchical mode for this test so we proceed without parent
+                            self.hierarchical_config["enabled"] = False
+                        else:
+                            self.logger.error("Parent aggregator aborted the session. Skipping this test.")
+                            return False
+                    else:
+                        self.logger.info("Received parent start signal. Starting local training!")
 
             self._send_command(json.dumps(start_command, separators=(',', ':')))
             
