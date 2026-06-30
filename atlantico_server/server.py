@@ -1717,6 +1717,15 @@ class MQTTFederatedServer:
         self.hierarchical_config = original_config.copy()
         
         original_enabled = self.hierarchical_config.get("enabled", False)
+        if original_enabled:
+            topics = [
+                (self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT_RAW, 0),
+                (self.TOPIC_RECEIVE_FROM_PARENT, 0)
+            ]
+            self.client.subscribe(topics)
+            self.logger.info("Re-subscribed to parent topics at test startup.")
+            
         self.state.parent_command_status = "pending"
         self.state.waiting_for_parent_start = False
         try:
