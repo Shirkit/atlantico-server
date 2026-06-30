@@ -220,10 +220,9 @@ class MQTTFederatedServer:
                 try:
                     self.client.unsubscribe([
                         self.TOPIC_RECEIVE_FROM_PARENT,
-                        self.TOPIC_RECEIVE_FROM_PARENT_RAW,
-                        self.TOPIC_RECEIVE_COMMANDS_FROM_PARENT
+                        self.TOPIC_RECEIVE_FROM_PARENT_RAW
                     ])
-                    self.logger.info("Unsubscribed from parent topics because hierarchical mode was disabled.")
+                    self.logger.info("Unsubscribed from parent model topics because hierarchical mode was disabled (keeping commands channel open).")
                 except Exception as e:
                     self.logger.warning(f"Failed to unsubscribe from parent topics: {e}")
                     
@@ -447,7 +446,8 @@ class MQTTFederatedServer:
 
     def _send_to_parent(self, data, is_command=False, topic=None):
         """Send data to parent aggregator"""
-        if not self.hierarchical_config["enabled"]:
+        is_alive_ping = isinstance(data, dict) and data.get("command") == "alive"
+        if not self.hierarchical_config["enabled"] and not is_alive_ping:
             return
             
         try:
