@@ -1871,33 +1871,57 @@ class MQTTFederatedServer:
 
             # Wait for client connections in a robust, step-driven loop
             target_clients = expected_clients if (expected_clients and expected_clients > 0) else 1
-            max_wait_seconds = 120 if self.topic_prefix == "aggregator" else 15
-            self.logger.info(f"Waiting up to {max_wait_seconds}s for {target_clients} clients to join federation...")
+            self.logger.info(f"Waiting for {target_clients} clients to join federation...")
             
             joined_successfully = False
             last_join_broadcast = 0
+            last_alive_time = time.time()
+            elapsed = 0
             
-            for elapsed in range(max_wait_seconds):
-                if self.state.stop_requested:
-                    break
-                    
+            while not self.state.stop_requested:
                 # Re-broadcast join command every 3 seconds to ensure no messages are lost
                 if time.time() - last_join_broadcast >= 3:
                     join_command = {"command": "federate_join"}
                     self._send_command(json.dumps(join_command, separators=(',', ':')))
                     last_join_broadcast = time.time()
                     
+                # Check if target is reached
                 if len(self.state.federated_clients) >= target_clients:
                     joined_successfully = True
                     self.logger.info(f"All expected clients joined after {elapsed}s.")
                     break
                     
-                sleep(1)
+                # Calculate how many clients are currently active/alive on the broker.
+                # If we are the root aggregator, check child aggregators. If child aggregator, check devices.
+                # A client is alive if we have seen any MQTT message from it in the last 45 seconds.
+                alive_count = sum(1 for info in self.state.connected_clients.values()
+                                  if time.time() - info.get('last_seen', 0) < 45)
+                                  
+                # For child aggregators waiting for local devices, wait up to 15s absolute.
+                # For the parent aggregator waiting for child aggregators, wait indefinitely as long as they are alive.
+                if self.topic_prefix == "aggregator":
+                    if alive_count >= target_clients:
+                        # Reset the dead-client timeout because we have enough alive clients catching up
+                        last_alive_time = time.time()
+                    else:
+                        # If we don't have enough alive clients on the network, start/continue the 15-second grace period
+                        inactive_duration = time.time() - last_alive_time
+                        if inactive_duration > 15:
+                            self.logger.warning(
+                                f"Only {alive_count} clients alive on network (target: {target_clients}). "
+                                f"Aborting connection wait after {inactive_duration:.1f}s of inactivity."
+                            )
+                            break
+                else:
+                    # Child aggregator waiting for local devices (e.g. ESP32 waiting for ESP01-05).
+                    # Wait up to 15 seconds absolute for local devices.
+                    if elapsed >= 15:
+                        if len(self.state.federated_clients) >= 1:
+                            joined_successfully = True
+                        break
                 
-            if not joined_successfully and len(self.state.federated_clients) >= 1:
-                # If we didn't reach the target but have at least 1 client, and expected_clients wasn't strict
-                if not expected_clients:
-                    joined_successfully = True
+                sleep(1)
+                elapsed += 1
 
             if not joined_successfully:
                 self.logger.error(f"Test {test_number} failed: insufficient clients joined ({len(self.state.federated_clients)}/{target_clients})")
