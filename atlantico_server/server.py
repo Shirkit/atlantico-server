@@ -384,12 +384,12 @@ class MQTTFederatedServer:
                 self.join_parent()
             elif command == "federate_unsubscribe":
                 self.logger.info("Received unsubscribe command from parent aggregator")
-                if hasattr(self, 'state'):
+                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
                     self.state.parent_command_status = "canceled"
                     self.state.waiting_for_parent_start = False
             elif command == "federate_stop" or (command == "federate_end" and target_client is not None):
                 self.logger.info(f"Received {command} command (targeted/stop) from parent aggregator. Disabling parent connection.")
-                if hasattr(self, 'state'):
+                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
                     self.state.parent_command_status = "canceled"
                     self.state.waiting_for_parent_start = False
                 new_config = self.hierarchical_config.copy()
@@ -397,7 +397,7 @@ class MQTTFederatedServer:
                 self.update_hierarchical_config(new_config)
             elif command == "federate_end":
                 self.logger.info("Received federate_end command from parent aggregator. Finalizing current test.")
-                if hasattr(self, 'state'):
+                if hasattr(self, 'state') and getattr(self.state, 'waiting_for_parent_start', False):
                     self.state.parent_command_status = "canceled"
                     self.state.waiting_for_parent_start = False
                 
@@ -1674,6 +1674,9 @@ class MQTTFederatedServer:
     
     def _run_single_batch_test(self, test_config, test_number, expected_clients, base_path=None, interval_config=None):
         """Run a single federated learning test from batch configuration"""
+        original_config = self.hierarchical_config
+        self.hierarchical_config = original_config.copy()
+        
         original_enabled = self.hierarchical_config.get("enabled", False)
         self.state.parent_command_status = "pending"
         self.state.waiting_for_parent_start = False
@@ -1799,9 +1802,10 @@ class MQTTFederatedServer:
             if original_enabled and self.hierarchical_config.get("wait_for_parent_start", True):
                 status = getattr(self.state, 'parent_command_status', 'pending')
                 
+                # If we are in the first test, we never skip/fallback. We treat 'canceled' at startup as pending.
                 if status == "started":
                     self.logger.info("Parent start signal already received. Proceeding to local training!")
-                elif status == "canceled":
+                elif status == "canceled" and test_number > 1:
                     self.logger.warning("Parent aggregator already aborted/ended the session. Skipping start wait.")
                     if self.hierarchical_config.get("continue_on_parent_abort", True):
                         self.logger.warning("Falling back to standalone/local training.")
@@ -1818,6 +1822,10 @@ class MQTTFederatedServer:
                     # Wait in a loop until released or stopped
                     while self.state.waiting_for_parent_start and not self.state.stop_requested:
                         sleep(0.5)
+                        if test_number == 1 and getattr(self.state, 'parent_command_status', 'pending') == "canceled":
+                            self.logger.warning("First test: ignoring parent abort signal. Still waiting for parent start command...")
+                            self.state.parent_command_status = "pending"
+                            self.state.waiting_for_parent_start = True
                     
                     if self.state.stop_requested:
                         self.logger.info("Stop requested while waiting for parent aggregator. Aborting test.")
@@ -1869,9 +1877,9 @@ class MQTTFederatedServer:
             traceback.print_exc()
             return False
         finally:
-            # Restore original hierarchical enabled status
-            if 'original_enabled' in locals():
-                self.hierarchical_config["enabled"] = original_enabled
+            # Restore original hierarchical config dictionary reference
+            if 'original_config' in locals():
+                self.hierarchical_config = original_config
             # Ensure cleanup happens even if test fails
             try:
                 self._send_unsubscribe_command()

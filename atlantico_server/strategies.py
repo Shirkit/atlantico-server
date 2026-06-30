@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import numpy as np
 from .log_setup import setup_logging
 
@@ -90,6 +91,7 @@ class BoundedAsynchronousStrategy(BaseStrategy):
     def __init__(self, server):
         super().__init__(server)
         self.parent_models_received = 0
+        self.last_wait_log_time = 0
 
     def setup(self):
         self.server.register_event_handler("on_parent_model_received", self.on_parent_model_received, priority=5)
@@ -141,8 +143,10 @@ class BoundedAsynchronousStrategy(BaseStrategy):
         
         # If we are more than window_size rounds ahead of the parent, wait
         if local_round - self.parent_models_received > window_size:
-            if self.logger:
+            current_time = time.time()
+            if self.logger and current_time - self.last_wait_log_time >= 30:
                 self.logger.info(f"Strategy: Bounded Asynchronous waiting (local round {local_round} is > {window_size} rounds ahead of parent)")
+                self.last_wait_log_time = current_time
             return False
         return True
 
